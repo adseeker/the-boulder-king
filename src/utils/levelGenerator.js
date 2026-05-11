@@ -24,12 +24,8 @@ function rng32(seed) {
 }
 
 export function getSessionSeed() {
-  let s = sessionStorage.getItem('bk_seed');
-  if (!s) {
-    s = ((Date.now() ^ (Math.random() * 0xFFFFFFFF)) >>> 0).toString();
-    sessionStorage.setItem('bk_seed', s);
-  }
-  return parseInt(s);
+  // Fresh random seed every call — different layout each play/retry
+  return (Date.now() ^ (Math.random() * 0x7FFFFFFF | 0)) >>> 0;
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────────
