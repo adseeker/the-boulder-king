@@ -144,27 +144,28 @@ export const LEVELS = {
     pumpRate: 15,
     gameoverMsgs: ['PUMPED OUT!','YOUR TENDONS HAVE FILED A COMPLAINT.','DOCTORS HATE THIS ROUTE.','THAT WAS ACTUALLY IMPRESSIVE. STILL FELL THOUGH.','MINIMUM 2 YEARS TRAINING REQUIRED.'],
     winMsg: "V8?! WHO ARE YOU?!\nSeriously, who are you.",
+    // Feet stay on start holds — puzzle is pure hand sequence
+    // Solution: Q E Q E Q E Q E
     beta: {
       handL: ['h0', 'h2', 'h4', 'h6', 'h8'],
       handR: ['h1', 'h3', 'h5', 'h7', 'h8'],
-      footL: ['f0', 'f2'],
+      footL: ['f0'],
       footR: ['f1'],
     },
     holds: [
       { id:'h0', xr:0.46, yr:0.85, color:0x22C55E, label:'START' },
       { id:'h1', xr:0.54, yr:0.85, color:0x22C55E, label:'START' },
-      { id:'h2', xr:0.20, yr:0.70, color:0xDC2626 },
-      { id:'h3', xr:0.80, yr:0.60, color:0x7C3AED },
-      { id:'h4', xr:0.28, yr:0.48, color:0xDC2626 },
-      { id:'h5', xr:0.74, yr:0.37, color:0x7C3AED },
-      { id:'h6', xr:0.20, yr:0.25, color:0xDC2626 },
-      { id:'h7', xr:0.78, yr:0.15, color:0x7C3AED },
+      { id:'h2', xr:0.27, yr:0.70, color:0xDC2626 },
+      { id:'h3', xr:0.73, yr:0.60, color:0x7C3AED },
+      { id:'h4', xr:0.30, yr:0.48, color:0xDC2626 },
+      { id:'h5', xr:0.72, yr:0.37, color:0x7C3AED },
+      { id:'h6', xr:0.27, yr:0.25, color:0xDC2626 },
+      { id:'h7', xr:0.73, yr:0.15, color:0x7C3AED },
       { id:'h8', xr:0.50, yr:0.07, color:0xF59E0B, label:'TOP' },
     ],
     footHolds: [
       { id:'f0', xr:0.47, yr:0.91, color:0x6B7280 },
       { id:'f1', xr:0.53, yr:0.91, color:0x6B7280 },
-      { id:'f2', xr:0.22, yr:0.77, color:0x6B7280 },
     ],
   },
 
@@ -175,6 +176,8 @@ export const LEVELS = {
     pumpRate: 20,
     gameoverMsgs: ['PUMPED OUT!','THIS IS A V10. WHAT DID YOU EXPECT.','BOLD STRATEGY. ZERO EXECUTION.','RESPECT. ALSO: LOL.','THE WALL SENDS ITS CONDOLENCES.'],
     winMsg: "YOU ARE THE BOULDER KING.\n👑 Bow. Everyone bow. 👑",
+    // Feet stay on start holds — pure hand sequence, extreme pump
+    // Solution: Q E Q E Q E Q E Q/E
     beta: {
       handL: ['h0', 'h2', 'h4', 'h6', 'h8', 'h9'],
       handR: ['h1', 'h3', 'h5', 'h7', 'h9'],
@@ -184,13 +187,13 @@ export const LEVELS = {
     holds: [
       { id:'h0', xr:0.47, yr:0.86, color:0x22C55E, label:'START' },
       { id:'h1', xr:0.53, yr:0.86, color:0x22C55E, label:'START' },
-      { id:'h2', xr:0.18, yr:0.72, color:0x7C3AED },
-      { id:'h3', xr:0.82, yr:0.62, color:0xDC2626 },
-      { id:'h4', xr:0.26, yr:0.50, color:0x7C3AED },
-      { id:'h5', xr:0.76, yr:0.40, color:0xDC2626 },
-      { id:'h6', xr:0.18, yr:0.27, color:0x7C3AED },
-      { id:'h7', xr:0.82, yr:0.17, color:0xDC2626 },
-      { id:'h8', xr:0.32, yr:0.09, color:0x7C3AED },
+      { id:'h2', xr:0.24, yr:0.72, color:0x7C3AED },
+      { id:'h3', xr:0.76, yr:0.62, color:0xDC2626 },
+      { id:'h4', xr:0.28, yr:0.50, color:0x7C3AED },
+      { id:'h5', xr:0.74, yr:0.40, color:0xDC2626 },
+      { id:'h6', xr:0.24, yr:0.27, color:0x7C3AED },
+      { id:'h7', xr:0.76, yr:0.17, color:0xDC2626 },
+      { id:'h8', xr:0.34, yr:0.09, color:0x7C3AED },
       { id:'h9', xr:0.50, yr:0.04, color:0xF59E0B, label:'TOP' },
     ],
     footHolds: [
