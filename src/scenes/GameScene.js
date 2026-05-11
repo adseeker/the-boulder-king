@@ -63,12 +63,17 @@ export default class GameScene extends Phaser.Scene {
     this.createClimber(W, H);
     this.climberGfx     = this.add.graphics();
 
+    this.limbTargets = {};
     this.setupInput();
     this.setupHUD(W, H);
+    this.setupTargetLabels();
     this.updateTorsoTarget();
+    this.recalcTargets();
     this.drawHoldOverlays();
+    this.updateTargetLabels();
     this.drawClimber();
     this.startBetaSprayTimer();
+    this.showStartHints();
   }
 
   update(_, delta) {
@@ -110,7 +115,9 @@ export default class GameScene extends Phaser.Scene {
     if (this.pump >= 100) { this.startFall(); return; }
     if (this.checkWin())  { this.startWin();  return; }
 
+    this.recalcTargets();
     this.drawHoldOverlays();
+    this.updateTargetLabels();
     this.drawClimber();
     this.updateHUD();
   }
@@ -273,7 +280,7 @@ export default class GameScene extends Phaser.Scene {
       V10: `V10. I AM THE BOULDER KING. ${stars}\nSomeone please check on me. 👑`,
     };
     const gameUrl = window.location.hostname === 'localhost'
-      ? 'https://the-boulder-king.vercel.app'
+      ? 'https://the-boulder-king.vercel.app'  // update after deploy
       : window.location.origin;
 
     const text = `🧗 THE BOULDER KING\n${gradeLines[grade] || `${grade} sent! ${stars}`}\nScore: ${score}\nPlay: ${gameUrl}\n#BoulderKing #Climbing #Bouldering`;
@@ -484,31 +491,26 @@ export default class GameScene extends Phaser.Scene {
       limb.grabbed = false; limb.holdId = null;
       playRelease(ctx);
     } else {
-      const reach    = isHand ? 200 : 165;
-      const occupied = Object.entries(this.climber.limbs)
-        .filter(([k, l]) => k !== key && l.grabbed)
-        .map(([, l]) => l.holdId);
-
-      const reachable = this.allHolds
-        .filter(h => {
-          if (occupied.includes(h.id)) return false;
-          return Phaser.Math.Distance.Between(this.climber.torso.x, this.climber.torso.y, h.x, h.y) <= reach;
-        })
-        .sort((a, b) =>
-          Phaser.Math.Distance.Between(this.climber.torso.x, this.climber.torso.y, a.x, a.y) -
-          Phaser.Math.Distance.Between(this.climber.torso.x, this.climber.torso.y, b.x, b.y)
-        );
-
-      if (!reachable.length) return;
-      const t = reachable[0];
-      limb.x = t.x; limb.y = t.y;
-      limb.grabbed = true; limb.holdId = t.id;
+      const target = this.limbTargets[key];
+      if (!target) {
+        // No holds in reach — give clear feedback
+        this.cameras.main.shake(130, 0.005);
+        const bang = this.add.text(limb.x, limb.y - 18, 'OUT OF REACH', {
+          fontSize: '13px', fontFamily: 'Arial Black', color: '#EF4444',
+          stroke: '#000', strokeThickness: 3,
+        }).setOrigin(0.5);
+        this.tweens.add({ targets: bang, y: bang.y - 28, alpha: 0, duration: 600, onComplete: () => bang.destroy() });
+        return;
+      }
+      limb.x = target.x; limb.y = target.y;
+      limb.grabbed = true; limb.holdId = target.id;
       this.moves++;
       playGrab(ctx);
-      this.chalkPuff(t.x, t.y);
-      this.showGrabText(t.x, t.y, isHand);
+      this.chalkPuff(target.x, target.y);
+      this.showGrabText(target.x, target.y, isHand);
     }
     this.updateTorsoTarget();
+    this.recalcTargets();
   }
 
   updateTorsoTarget() {
@@ -520,7 +522,7 @@ export default class GameScene extends Phaser.Scene {
     let tx, ty;
     if (hands.length) {
       tx = hands.reduce((s,h) => s+h.x,0) / hands.length;
-      ty = hands.reduce((s,h) => s+h.y,0) / hands.length + 68;
+      ty = hands.reduce((s,h) => s+h.y,0) / hands.length + 52;
       if (feet.length) {
         tx = tx*0.65 + feet.reduce((s,f) => s+f.x,0)/feet.length*0.35;
         ty = ty*0.60 + (feet.reduce((s,f) => s+f.y,0)/feet.length - 78)*0.40;
@@ -538,6 +540,99 @@ export default class GameScene extends Phaser.Scene {
   getFreePos(key) {
     const tx = this.climber.torso.x; const ty = this.climber.torso.y;
     return { handL:{x:tx-48,y:ty+12}, handR:{x:tx+48,y:ty+12}, footL:{x:tx-22,y:ty+68}, footR:{x:tx+22,y:ty+68} }[key];
+  }
+
+  // Shoulder / hip anchor for reach calculation (more realistic than torso center)
+  getLimbAnchor(key) {
+    const tx = this.climber.torso.x, ty = this.climber.torso.y;
+    return {
+      handL: { x: tx - 20, y: ty - 35 },
+      handR: { x: tx + 20, y: ty - 35 },
+      footL: { x: tx - 14, y: ty + 28 },
+      footR: { x: tx + 14, y: ty + 28 },
+    }[key];
+  }
+
+  // Pre-calculate which hold each FREE limb will target next frame
+  recalcTargets() {
+    if (this.state !== 'playing') return;
+    const REACH  = { handL: 340, handR: 340, footL: 220, footR: 220 };
+    const limbs  = this.climber.limbs;
+    const occupied = Object.values(limbs).filter(l => l.grabbed).map(l => l.holdId);
+
+    this.limbTargets = {};
+    Object.entries(limbs).filter(([, l]) => !l.grabbed).forEach(([key]) => {
+      const anchor = this.getLimbAnchor(key);
+      const best   = this.allHolds
+        .filter(h => !occupied.includes(h.id))
+        .filter(h => Phaser.Math.Distance.Between(anchor.x, anchor.y, h.x, h.y) <= REACH[key])
+        .sort((a, b) =>
+          Phaser.Math.Distance.Between(anchor.x, anchor.y, a.x, a.y) -
+          Phaser.Math.Distance.Between(anchor.x, anchor.y, b.x, b.y)
+        )[0] || null;
+      this.limbTargets[key] = best;
+    });
+  }
+
+  // Floating key-badge labels that hover above the target hold
+  setupTargetLabels() {
+    const cfgs = [
+      { key:'handL', label:'Q', color:'#60A5FA' },
+      { key:'handR', label:'E', color:'#60A5FA' },
+      { key:'footL', label:'Z', color:'#FB923C' },
+      { key:'footR', label:'X', color:'#FB923C' },
+    ];
+    this.targetLabels = {};
+    cfgs.forEach(({ key, label, color }) => {
+      this.targetLabels[key] = this.add.text(-999, -999, label, {
+        fontSize: '13px', fontFamily: 'Arial Black', color,
+        backgroundColor: 'rgba(0,0,0,0.72)',
+        padding: { x: 6, y: 4 },
+      }).setOrigin(0.5).setDepth(10);
+    });
+  }
+
+  updateTargetLabels() {
+    const limbs = this.climber.limbs;
+    Object.entries(this.targetLabels).forEach(([key, label]) => {
+      const hold = this.limbTargets[key];
+      const limb = limbs[key];
+      if (hold && !limb?.grabbed && this.state === 'playing') {
+        label.setPosition(hold.x, hold.y - 30).setVisible(true);
+      } else {
+        label.setVisible(false);
+      }
+    });
+  }
+
+  // First-play tutorial hints (V0 only, shown once)
+  showStartHints() {
+    if (this.levelConfig.grade !== 'V0') return;
+    if (localStorage.getItem('bk_hints_done')) return;
+    localStorage.setItem('bk_hints_done', '1');
+
+    const W = this.W, H = this.H;
+    const style = { fontFamily: 'Arial Black', stroke: '#000', strokeThickness: 4 };
+
+    const hints = [
+      this.add.text(W/2, H*0.28,
+        'Colored rings show where each limb will go',
+        { ...style, fontSize:'18px', color:'#FFFFFF' }).setOrigin(0.5).setAlpha(0).setDepth(20),
+      this.add.text(W/2, H*0.35,
+        'Q / E = hands  •  Z / X = feet',
+        { ...style, fontSize:'16px', color:'#60A5FA' }).setOrigin(0.5).setAlpha(0).setDepth(20),
+      this.add.text(W/2, H*0.42,
+        'Keep at least 3 limbs on holds or you\'ll pump out!',
+        { ...style, fontSize:'14px', color:'#F59E0B' }).setOrigin(0.5).setAlpha(0).setDepth(20),
+    ];
+
+    hints.forEach((t, i) => {
+      this.tweens.add({ targets: t, alpha: 1, duration: 400, delay: i * 600 });
+    });
+    // Fade out after 5s or on first key press
+    const fade = () => hints.forEach(t => this.tweens.add({ targets: t, alpha: 0, duration: 500, onComplete: () => t.destroy() }));
+    this.time.delayedCall(5000, fade);
+    this.input.keyboard.once('keydown', fade);
   }
 
   // ── Wall & holds ────────────────────────────────────────────────────────────
@@ -592,6 +687,7 @@ export default class GameScene extends Phaser.Scene {
     const limbs    = this.climber.limbs;
     const occupied = Object.values(limbs).filter(l => l.grabbed).map(l => l.holdId);
 
+    // White ring on grabbed holds
     Object.values(limbs).filter(l => l.grabbed).forEach(limb => {
       const hold = this.allHolds.find(h => h.id === limb.holdId);
       if (!hold) return;
@@ -600,13 +696,44 @@ export default class GameScene extends Phaser.Scene {
     });
 
     if (this.state !== 'playing') return;
-    const reach = { handL:200, handR:200, footL:165, footR:165 };
-    Object.entries(limbs).filter(([,l]) => !l.grabbed).forEach(([key]) => {
+
+    const RING_COLORS = { handL:0x60A5FA, handR:0x60A5FA, footL:0xFB923C, footR:0xFB923C };
+    const pulse = 0.55 + 0.45 * Math.sin(Date.now() / 180);
+
+    Object.entries(this.limbTargets || {}).forEach(([key, hold]) => {
+      if (!hold || limbs[key]?.grabbed) return;
+      const col  = RING_COLORS[key];
+      const limb = limbs[key];
+
+      // Pulsing colored ring on target hold
+      g.lineStyle(3, col, 0.55 + pulse * 0.45);
+      g.strokeEllipse(hold.x, hold.y, 60, 42);
+      g.lineStyle(1.5, col, 0.2 + pulse * 0.2);
+      g.strokeEllipse(hold.x, hold.y, 74, 54);
+
+      // Dashed line from current free limb position to target
+      const steps = 7;
+      g.lineStyle(1.5, col, 0.45);
+      for (let i = 0; i < steps; i += 2) {
+        const t0 = i / steps, t1 = Math.min(1, (i + 1.2) / steps);
+        g.beginPath();
+        g.moveTo(limb.x + (hold.x - limb.x) * t0, limb.y + (hold.y - limb.y) * t0);
+        g.lineTo(limb.x + (hold.x - limb.x) * t1, limb.y + (hold.y - limb.y) * t1);
+        g.strokePath();
+      }
+    });
+
+    // Dim rings on other reachable holds (not the primary target)
+    const REACH = { handL:340, handR:340, footL:220, footR:220 };
+    Object.entries(limbs).filter(([, l]) => !l.grabbed).forEach(([key]) => {
+      const anchor  = this.getLimbAnchor(key);
+      const primary = this.limbTargets[key];
       this.allHolds.filter(h => {
         if (occupied.includes(h.id)) return false;
-        return Phaser.Math.Distance.Between(this.climber.torso.x, this.climber.torso.y, h.x, h.y) <= reach[key];
+        if (primary && h.id === primary.id) return false; // already shown above
+        return Phaser.Math.Distance.Between(anchor.x, anchor.y, h.x, h.y) <= REACH[key];
       }).forEach(h => {
-        g.lineStyle(2, 0xFFFFFF, 0.35); g.strokeEllipse(h.x, h.y, 52, 34);
+        g.lineStyle(1.5, 0xFFFFFF, 0.18); g.strokeEllipse(h.x, h.y, 52, 34);
       });
     });
   }
