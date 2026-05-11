@@ -36,16 +36,23 @@ const HOLD_COLORS_R = [0xEF4444, 0xA855F7, 0xF97316];
 
 // ── Grade parameters ────────────────────────────────────────────────────────────
 
+// ARM_LENGTH and FOOT_LENGTH in px at cs=1 (720p baseline) — must match GameScene constants
+const ARM_PX  = 120;
+const FOOT_PX = 100;
+// Generator uses a small margin above physical length to ensure solvability
+const ARM_REACH  = ARM_PX  * 1.05 / 720;  // ~0.175H
+const FOOT_REACH = FOOT_PX * 1.05 / 720;  // ~0.146H
+
 export const GRADE_PARAMS = {
   V0: {
     grade:'V0', name:'Warm-Up', tagline:'Big holds, chill vibes.',
     difficulty:'🟢 Easy', color:0x22C55E, holdScale:1.00,
     pumpRate:4,
-    armReach:0.34, footReach:0.24,
-    // How far left/right holds can go (H-units each side)
-    sideRange:0.18,
+    armReach:ARM_REACH, footReach:FOOT_REACH,
+    // How far left/right holds can go (H-units each side) — must stay within armReach
+    sideRange:0.11,
     // Minimum vertical step per hand hold (H-units)
-    minVertStep:0.10,
+    minVertStep:0.08,
     sequence:['handL','footL','handR','footR','handL','footL','handR'],
     gameoverMsgs:['PUMPED OUT!','THAT WAS A V0, BY THE WAY...','HAVE YOU TRIED USING YOUR FEET?','YOUR FOREARMS HAVE LEFT THE CHAT','GRAVITY: 1 — YOU: 0'],
     winMsg:"The bar is low and you cleared it.\nBut hey — it counts.",
@@ -54,8 +61,8 @@ export const GRADE_PARAMS = {
     grade:'V2', name:'Getting Serious', tagline:'Some crossing, some swearing.',
     difficulty:'🟡 Medium', color:0xF59E0B, holdScale:0.85,
     pumpRate:6,
-    armReach:0.33, footReach:0.23,
-    sideRange:0.22, minVertStep:0.09,
+    armReach:ARM_REACH, footReach:FOOT_REACH,
+    sideRange:0.12, minVertStep:0.08,
     sequence:['handL','footL','handR','footR','handL','footL','handR','footR','handL','handR'],
     gameoverMsgs:['PUMPED OUT!',"BETA SPRAY DIDN'T HELP, HUH?",'TRY THE SEQUENCE AGAIN. SLOWLY.','YOUR FOREARMS FILED FOR DIVORCE','THE WALL IS LAUGHING. I CAN HEAR IT.'],
     winMsg:"Now you're climbing.\nSomeone call Chris Sharma.",
@@ -64,8 +71,8 @@ export const GRADE_PARAMS = {
     grade:'V4', name:'Pain Cave', tagline:'Your forearms will hate you.',
     difficulty:'🔴 Hard', color:0xEF4444, holdScale:0.72,
     pumpRate:8.5,
-    armReach:0.32, footReach:0.22,
-    sideRange:0.26, minVertStep:0.08,
+    armReach:ARM_REACH, footReach:FOOT_REACH,
+    sideRange:0.13, minVertStep:0.07,
     sequence:['handL','footL','handR','footR','handL','handR','footL','handR','footR'],
     gameoverMsgs:['PUMPED OUT!','HONESTLY, RESPECT FOR TRYING.','THE DYNO SAID NO.','FOREARMS = COOKED. WELL DONE.',"HAVE YOU CONSIDERED YOGA INSTEAD?"],
     winMsg:"ABSOLUTE UNIT. 💪\nThe boulder bows to you.",
@@ -74,8 +81,8 @@ export const GRADE_PARAMS = {
     grade:'V6', name:'The Project', tagline:"You've been staring at this for weeks.",
     difficulty:'🟠 Very Hard', color:0xF97316, holdScale:0.62,
     pumpRate:12,
-    armReach:0.31, footReach:0.22,
-    sideRange:0.28, minVertStep:0.07,
+    armReach:ARM_REACH, footReach:FOOT_REACH,
+    sideRange:0.13, minVertStep:0.07,
     sequence:['handL','footL','handR','footR','handL','footL','handR','handR','footR','handL','handR'],
     gameoverMsgs:['PUMPED OUT!','EVEN THE HOLDS ARE JUDGING YOU.','THIS IS YOUR PROJECT NOW. FOREVER.','SPAGHETTI ARMS DETECTED.','THE SEQUENCE WAS RIGHT THERE...'],
     winMsg:"PROJECT SENT.\nYou may now talk about this at every dinner.",
@@ -84,8 +91,8 @@ export const GRADE_PARAMS = {
     grade:'V8', name:'Crimpers Only', tagline:'Your tendons just cried a little.',
     difficulty:'🔴 Extreme', color:0xDC2626, holdScale:0.54,
     pumpRate:15,
-    armReach:0.30, footReach:0.21,
-    sideRange:0.30, minVertStep:0.07,
+    armReach:ARM_REACH, footReach:FOOT_REACH,
+    sideRange:0.14, minVertStep:0.07,
     sequence:['handL','footL','handR','footR','handL','footL','handR','footR','handL','footL','handR','handR'],
     gameoverMsgs:['PUMPED OUT!','YOUR TENDONS HAVE FILED A COMPLAINT.','DOCTORS HATE THIS ROUTE.','THAT WAS ACTUALLY IMPRESSIVE. STILL FELL THOUGH.','MINIMUM 2 YEARS TRAINING REQUIRED.'],
     winMsg:"V8?! WHO ARE YOU?!\nSeriously, who are you.",
@@ -94,8 +101,8 @@ export const GRADE_PARAMS = {
     grade:'V10', name:'The Dream', tagline:'Bold of you to try.',
     difficulty:'⚫ Legendary', color:0x7C3AED, holdScale:0.46,
     pumpRate:20,
-    armReach:0.29, footReach:0.20,
-    sideRange:0.31, minVertStep:0.06,
+    armReach:ARM_REACH, footReach:FOOT_REACH,
+    sideRange:0.14, minVertStep:0.06,
     sequence:['handL','footL','handR','footR','handL','footL','handR','footR','handL','footL','handR','footR','handL','handR'],
     gameoverMsgs:['PUMPED OUT!','THIS IS A V10. WHAT DID YOU EXPECT.','BOLD STRATEGY. ZERO EXECUTION.','RESPECT. ALSO: LOL.','THE WALL SENDS ITS CONDOLENCES.'],
     winMsg:"YOU ARE THE BOULDER KING.\n👑 Bow. Everyone bow. 👑",

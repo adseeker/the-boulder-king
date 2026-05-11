@@ -7,6 +7,12 @@ import { playGrab, playRelease, playFall, playSplat,
 // Keep LEVELS alias for MainMenuScene compat (storage.js uses LEVEL_ORDER only)
 const LEVELS = GRADE_PARAMS;
 
+// ── Fixed limb lengths (px at cs=1 / 720p baseline) ──────────────────────────
+// These are PHYSICAL constants — arms/legs never stretch beyond these.
+// Reach radius in gameplay = same value (physics matches visuals exactly).
+const ARM_LENGTH  = 120;
+const FOOT_LENGTH = 100;
+
 const hex = n => '#' + n.toString(16).padStart(6, '0');
 
 const BETA_SPRAY = [
@@ -632,7 +638,8 @@ export default class GameScene extends Phaser.Scene {
   getBestTarget(key) {
     const limb    = this.climber.limbs[key];
     const isHand  = key.startsWith('hand');
-    const reach   = isHand ? this.levelConfig.armReach * this.H : this.levelConfig.footReach * this.H;
+    // Reach = physical limb length × character scale. Matches drawClimber clamping exactly.
+    const reach   = (isHand ? ARM_LENGTH : FOOT_LENGTH) * this.cs;
     const anchor  = this.getLimbAnchor(key);
     const occupied = Object.entries(this.climber.limbs)
       .filter(([k, l]) => k !== key && (l.grabbed || l.phase === 'reaching'))
@@ -893,20 +900,37 @@ export default class GameScene extends Phaser.Scene {
     const shldrLX=sx-20*cs, shldrRX=sx+20*cs, hipY=sy+26*cs, hipLX=sx-14*cs, hipRX=sx+14*cs;
     const SKIN=0xC8845A, SHIRT=this.outfit.shirt, SHORT=0x1E293B, SHOE=this.outfit.shoe, SOLE=this.outfit.sole, LW=15*cs;
 
-    this.drawLimb(g, shldrRX, shldrY, limbs.handR.x, limbs.handR.y, SKIN, LW-cs,  1);
-    g.fillStyle(SKIN); g.fillCircle(limbs.handR.x, limbs.handR.y, 8*cs);
-    this.drawLimb(g, hipRX, hipY, limbs.footR.x, limbs.footR.y, SKIN, LW+cs, -1);
-    this.drawShoe(g, limbs.footR.x, limbs.footR.y, SHOE, SOLE, cs);
+    // ── Clamp limb endpoints to fixed physical length ────────────────────────
+    // Arms and legs NEVER stretch beyond ARM_LENGTH / FOOT_LENGTH.
+    // This is the core physics constraint: reach is determined by body position.
+    const AL = ARM_LENGTH  * cs;
+    const FL = FOOT_LENGTH * cs;
+    const clamp = (ax, ay, bx, by, maxLen) => {
+      const dx = bx-ax, dy = by-ay;
+      const d  = Math.sqrt(dx*dx + dy*dy) || 1;
+      if (d <= maxLen) return { x: bx, y: by };
+      const r = maxLen / d;
+      return { x: ax + dx*r, y: ay + dy*r };
+    };
+    const HR = clamp(shldrRX, shldrY, limbs.handR.x, limbs.handR.y, AL);
+    const HL = clamp(shldrLX, shldrY, limbs.handL.x, limbs.handL.y, AL);
+    const FR = clamp(hipRX, hipY, limbs.footR.x, limbs.footR.y, FL);
+    const FL2= clamp(hipLX, hipY, limbs.footL.x, limbs.footL.y, FL);
+
+    this.drawLimb(g, shldrRX, shldrY, HR.x, HR.y, SKIN, LW-cs,  1);
+    g.fillStyle(SKIN); g.fillCircle(HR.x, HR.y, 8*cs);
+    this.drawLimb(g, hipRX, hipY, FR.x, FR.y, SKIN, LW+cs, -1);
+    this.drawShoe(g, FR.x, FR.y, SHOE, SOLE, cs);
 
     g.fillStyle(SHIRT); g.fillRoundedRect(sx-22*cs, shldrY, 44*cs, hipY-shldrY+6*cs, {tl:10*cs,tr:10*cs,bl:4*cs,br:4*cs});
     g.fillStyle(0x000000,0.08); g.fillEllipse(sx, shldrY+4*cs, 28*cs, 10*cs);
     g.fillStyle(SHORT); g.fillRoundedRect(sx-20*cs, hipY-2*cs, 40*cs, 26*cs, {tl:4*cs,tr:4*cs,bl:8*cs,br:8*cs});
     g.lineStyle(2, 0x0F172A, 0.5); g.beginPath(); g.moveTo(sx-20*cs,hipY-2*cs); g.lineTo(sx+20*cs,hipY-2*cs); g.strokePath();
 
-    this.drawLimb(g, hipLX, hipY, limbs.footL.x, limbs.footL.y, SKIN, LW+cs, 1);
-    this.drawShoe(g, limbs.footL.x, limbs.footL.y, SHOE, SOLE, cs);
-    this.drawLimb(g, shldrLX, shldrY, limbs.handL.x, limbs.handL.y, SKIN, LW-cs, -1);
-    g.fillStyle(SKIN); g.fillCircle(limbs.handL.x, limbs.handL.y, 8*cs);
+    this.drawLimb(g, hipLX, hipY, FL2.x, FL2.y, SKIN, LW+cs, 1);
+    this.drawShoe(g, FL2.x, FL2.y, SHOE, SOLE, cs);
+    this.drawLimb(g, shldrLX, shldrY, HL.x, HL.y, SKIN, LW-cs, -1);
+    g.fillStyle(SKIN); g.fillCircle(HL.x, HL.y, 8*cs);
 
     g.fillStyle(0xF1F5F9); g.fillEllipse(sx+26*cs, sy+10*cs, 18*cs, 22*cs);
     g.lineStyle(2,0xCBD5E1); g.strokeEllipse(sx+26*cs, sy+10*cs, 18*cs, 22*cs);
