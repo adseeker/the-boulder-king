@@ -795,7 +795,6 @@ export default class GameScene extends Phaser.Scene {
 
     g.fillStyle(0x3B82F6); g.fillRect(0, H-48, W, 48);
     g.fillStyle(0x2563EB); g.fillRect(0, H-48, W, 8);
-    g.fillStyle(0xFF6B35); g.fillRect(0, 0, W, 10);
   }
 
   setupHolds(W, H) {

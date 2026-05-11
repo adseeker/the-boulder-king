@@ -33,18 +33,8 @@ export default class MainMenuScene extends Phaser.Scene {
     g.fillStyle(0x2563EB); g.fillRect(0, H-48, W, 8);
   }
 
-  // ── Title ─────────────────────────────────────────────────────────────────────
-
-  drawTitle(W, H) {
-    this.add.rectangle(W/2, 0, W, 54, 0x000000, 0.55).setOrigin(0.5, 0);
-    this.add.text(W/2, 14, '👑  THE BOULDER KING  👑', {
-      fontSize: '30px', fontFamily: 'Arial Black', color: '#FF6B35',
-      stroke: '#000000', strokeThickness: 5,
-    }).setOrigin(0.5, 0);
-    this.add.text(W/2, 48, '"How hard can it be?"', {
-      fontSize: '13px', fontFamily: 'Arial', color: '#9CA3AF', fontStyle: 'italic',
-    }).setOrigin(0.5, 0);
-  }
+  // ── Title — removed (shown by landing page / browser chrome) ─────────────────
+  drawTitle() {}
 
   // ── Character (victory pose) ──────────────────────────────────────────────────
 
@@ -52,7 +42,7 @@ export default class MainMenuScene extends Phaser.Scene {
     const g   = this.add.graphics();
     const outfit = OUTFITS[this.save.selectedOutfit] || OUTFITS.default;
     const tx = W * 0.50;
-    const ty = H * 0.34;
+    const ty = H * 0.26;  // moved up — no title bar above anymore
 
     const handL = { x: tx - W*0.17, y: ty - 58 };
     const handR = { x: tx + W*0.17, y: ty - 52 };
@@ -111,14 +101,14 @@ export default class MainMenuScene extends Phaser.Scene {
 
   drawOutfitSelector(W, H) {
     const selected = this.save.selectedOutfit || 'default';
-    const y = H * 0.56;
-    const swatchR = 16;
-    const gap     = 44;
+    const y = H * 0.48;  // moved up
+    const swatchR = 18;
+    const gap     = 52;
     const totalW  = OUTFIT_ORDER.length * gap;
     const startX  = W/2 - totalW/2 + gap/2;
 
-    this.add.text(W/2, y - 26, 'OUTFIT', {
-      fontSize: '11px', fontFamily: 'Arial Black', color: '#6B7280',
+    this.add.text(W/2, y - 28, 'OUTFIT', {
+      fontSize: '13px', fontFamily: 'Arial Black', color: '#6B7280',
     }).setOrigin(0.5);
 
     OUTFIT_ORDER.forEach((id, i) => {
@@ -157,10 +147,9 @@ export default class MainMenuScene extends Phaser.Scene {
         hit.on('pointerout',  () => { g.setAlpha(1.0); });
       }
 
-      // Tooltip name
       if (unlocked) {
-        this.add.text(cx, y + swatchR + 8, outfit.name, {
-          fontSize: '9px', fontFamily: 'Arial', color: '#6B7280',
+        this.add.text(cx, y + swatchR + 10, outfit.name, {
+          fontSize: '11px', fontFamily: 'Arial', color: '#9CA3AF',
         }).setOrigin(0.5, 0);
       }
     });
@@ -169,13 +158,13 @@ export default class MainMenuScene extends Phaser.Scene {
   // ── Level grid (2 rows × 3) ───────────────────────────────────────────────────
 
   drawLevelGrid(W, H) {
-    const cardW  = Math.min(190, W * 0.27);
-    const cardH  = 105;
-    const gapX   = Math.min(22, W * 0.02);
-    const gapY   = 10;
+    const cardW  = Math.min(210, W * 0.28);
+    const cardH  = 120;
+    const gapX   = Math.min(20, W * 0.02);
+    const gapY   = 12;
     const totalW = cardW * 3 + gapX * 2;
     const startX = (W - totalW) / 2;
-    const row1Y  = H * 0.63;
+    const row1Y  = H * 0.57;
     const row2Y  = row1Y + cardH + gapY;
 
     LEVEL_ORDER.forEach((key, i) => {
@@ -204,50 +193,46 @@ export default class MainMenuScene extends Phaser.Scene {
     const cx = x + w/2;
 
     // Grade
-    this.add.text(cx, y + 18, lv.grade, {
-      fontSize: '24px', fontFamily: 'Arial Black',
+    this.add.text(cx, y + 20, lv.grade, {
+      fontSize: '28px', fontFamily: 'Arial Black',
       color: locked ? '#4B5563' : hex(lv.color),
     }).setOrigin(0.5);
 
     // Name
-    this.add.text(cx, y + 42, lv.name, {
-      fontSize: '11px', fontFamily: 'Arial Black',
-      color: locked ? '#374151' : '#FFFFFF',
+    this.add.text(cx, y + 48, lv.name, {
+      fontSize: '13px', fontFamily: 'Arial Black',
+      color: locked ? '#6B7280' : '#E5E7EB',
     }).setOrigin(0.5);
 
     if (locked) {
-      // Show which level unlocks this
       const idx = LEVEL_ORDER.indexOf(lv.grade);
-      this.add.text(cx, y + 60, `🔒 Complete ${LEVEL_ORDER[idx-1]}`, {
-        fontSize: '10px', fontFamily: 'Arial', color: '#4B5563',
+      this.add.text(cx, y + 70, `🔒 Complete ${LEVEL_ORDER[idx-1]}`, {
+        fontSize: '11px', fontFamily: 'Arial', color: '#6B7280',
       }).setOrigin(0.5);
       return;
     }
 
     if (done) {
-      // Best score + stars
       const best  = load().bestScores[lv.grade] || 0;
       const stars = best >= 800 ? '⭐⭐⭐' : best >= 500 ? '⭐⭐' : '⭐';
-      this.add.text(cx, y + 58, stars, { fontSize: '16px' }).setOrigin(0.5);
-      this.add.text(cx, y + 76, `Best: ${best}`, {
-        fontSize: '10px', fontFamily: 'Arial', color: '#9CA3AF',
+      this.add.text(cx, y + 66, stars, { fontSize: '18px' }).setOrigin(0.5);
+      this.add.text(cx, y + 86, `Best: ${best}`, {
+        fontSize: '12px', fontFamily: 'Arial', color: '#D1D5DB',
       }).setOrigin(0.5);
 
-      // Small "REPLAY" button
-      const btn = this.add.rectangle(cx, y + h - 14, w - 28, 22, lv.color, 0.75)
+      const btn = this.add.rectangle(cx, y + h - 16, w - 24, 26, lv.color, 0.85)
         .setOrigin(0.5).setInteractive({ useHandCursor: true });
-      this.add.text(cx, y + h - 14, 'REPLAY', {
-        fontSize: '11px', fontFamily: 'Arial Black', color: '#FFFFFF',
+      this.add.text(cx, y + h - 16, 'REPLAY', {
+        fontSize: '13px', fontFamily: 'Arial Black', color: '#FFFFFF',
       }).setOrigin(0.5);
       btn.on('pointerdown', () => this.scene.start('GameScene', { level: lv.grade }));
       btn.on('pointerover', () => btn.setAlpha(1));
-      btn.on('pointerout',  () => btn.setAlpha(0.75));
+      btn.on('pointerout',  () => btn.setAlpha(0.85));
     } else {
-      // PLAY button
-      const btn = this.add.rectangle(cx, y + h - 18, w - 24, 30, lv.color)
+      const btn = this.add.rectangle(cx, y + h - 18, w - 24, 32, lv.color)
         .setOrigin(0.5).setInteractive({ useHandCursor: true });
       const txt = this.add.text(cx, y + h - 18, 'PLAY', {
-        fontSize: '14px', fontFamily: 'Arial Black', color: '#FFFFFF',
+        fontSize: '15px', fontFamily: 'Arial Black', color: '#FFFFFF',
       }).setOrigin(0.5);
       btn.on('pointerover', () => {
         btn.setFillStyle(Phaser.Display.Color.IntegerToColor(lv.color).lighten(18).color);
