@@ -201,9 +201,14 @@ export default class GameScene extends Phaser.Scene {
     playWin(this.sound.context);
     this.npcReact('win');
 
-    const lv    = this.levelConfig;
-    const s     = Math.floor(this.elapsed);
-    const score = Math.max(100, 1000 - s*4 - this.moves*8 + (this.pump < 50 ? 300 : this.pump < 75 ? 120 : 0));
+    const lv       = this.levelConfig;
+    const s        = Math.floor(this.elapsed);
+    const optMoves = (lv.sequence?.length || 7) + 1;
+    const score    = Math.max(50,
+      1000
+      - Math.max(0, (this.moves - optMoves) * 25) // extra moves penalty
+      - s * 3                                       // time penalty
+    );
 
     // Check outfit unlock BEFORE marking complete (markComplete changes state)
     const newOutfitId = checkOutfitUnlock(lv.grade);
@@ -255,35 +260,47 @@ export default class GameScene extends Phaser.Scene {
     const s     = Math.floor(this.elapsed);
     const mm    = String(Math.floor(s/60)).padStart(2,'0');
     const ss    = String(s%60).padStart(2,'0');
-    const stars = score >= 800 ? '⭐⭐⭐' : score >= 500 ? '⭐⭐' : '⭐';
+
+    // Stars based on pump remaining — how much energy you used
+    const stars = this.pump < 35 ? '⭐⭐⭐' : this.pump < 65 ? '⭐⭐' : '⭐';
 
     this.add.rectangle(W/2, H/2, W, H, 0x000000, 0.72).setOrigin(0.5);
-    this.add.text(W/2, H*0.12, '👑', { fontSize: '72px' }).setOrigin(0.5);
-    this.add.text(W/2, H*0.26, 'SEND IT!!!', {
+    this.add.text(W/2, H*0.11, '👑', { fontSize: '72px' }).setOrigin(0.5);
+    this.add.text(W/2, H*0.24, 'SEND IT!!!', {
       fontSize: '52px', fontFamily: 'Arial Black', color: '#FF6B35',
       stroke: '#000000', strokeThickness: 8,
     }).setOrigin(0.5);
-    this.add.text(W/2, H*0.38, lv.winMsg, {
+    this.add.text(W/2, H*0.36, lv.winMsg, {
       fontSize: '16px', fontFamily: 'Arial', color: '#9CA3AF', align: 'center',
     }).setOrigin(0.5);
-    this.add.text(W/2, H*0.50, `SCORE: ${score}`, {
+    this.add.text(W/2, H*0.47, `SCORE: ${score}`, {
       fontSize: '30px', fontFamily: 'Arial Black', color: '#FFFFFF',
     }).setOrigin(0.5);
-    this.add.text(W/2, H*0.58, `${lv.grade}  •  ${mm}:${ss}  •  ${this.moves} moves`, {
+    this.add.text(W/2, H*0.55, `${lv.grade}  •  ${mm}:${ss}  •  ${this.moves} moves`, {
       fontSize: '14px', fontFamily: 'Arial', color: '#9CA3AF',
     }).setOrigin(0.5);
-    this.add.text(W/2, H*0.65, stars, { fontSize: '34px' }).setOrigin(0.5);
+    this.add.text(W/2, H*0.62, stars, { fontSize: '34px' }).setOrigin(0.5);
+    this.add.text(W/2, H*0.69,
+      this.pump < 35 ? 'Perfect send!' : this.pump < 65 ? 'Solid effort' : 'Barely made it',
+      { fontSize: '13px', fontFamily: 'Arial', color: '#6B7280' }).setOrigin(0.5);
 
+    // Row 1: RETRY + NEXT or MAIN MENU
     const nextKey = LEVEL_ORDER[LEVEL_ORDER.indexOf(lv.grade) + 1];
+    this.makeButton(W/2 - 92, H*0.78, 'RETRY', '#FF6B35', () => this.scene.restart());
     if (nextKey) {
-      this.makeButton(W/2 - 92, H*0.75, `NEXT: ${nextKey}`, hex(LEVELS[nextKey].color),
+      this.makeButton(W/2 + 92, H*0.78, `NEXT: ${nextKey}`, hex(LEVELS[nextKey].color),
         () => this.scene.start('GameScene', { level: nextKey }));
+    } else {
+      this.makeButton(W/2 + 92, H*0.78, 'MAIN MENU', '#6B7280',
+        () => this.scene.start('MainMenuScene'));
     }
-    this.makeButton(nextKey ? W/2 + 92 : W/2 - 92, H*0.75, 'MAIN MENU', '#6B7280',
-      () => this.scene.start('MainMenuScene'));
 
-    // Share button
-    this.makeButton(W/2 + (nextKey ? 0 : 92), H*0.86, '📤 SHARE', '#22C55E',
+    // Row 2: MAIN MENU (if there's a next) + SHARE
+    if (nextKey) {
+      this.makeButton(W/2 - 92, H*0.88, 'MAIN MENU', '#6B7280',
+        () => this.scene.start('MainMenuScene'));
+    }
+    this.makeButton(nextKey ? W/2 + 92 : W/2, H*0.88, '📤 SHARE', '#22C55E',
       () => this.doShare(lv.grade, score, stars));
 
     this.input.keyboard.once('keydown-R', () => this.scene.restart());

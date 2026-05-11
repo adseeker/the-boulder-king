@@ -1,22 +1,21 @@
 /**
- * Procedural level generator for The Boulder King.
+ * Procedural level generator — The Boulder King.
  *
- * Each call with the same (grade, seed, aspectRatio) returns the same level.
- * Different seeds = different hold positions, identical difficulty characteristics.
+ * Guarantees:
+ *  - Every hold in the beta sequence is reachable from the previous anchor
+ *  - All holds are separated by at least MIN_HOLD_DIST (no clumping)
+ *  - Holds always progress UPWARD along the wall
+ *  - TOP hold is reachable from the last hand positions
+ *  - Left limb holds bias left, right limb holds bias right (readable route)
  *
- * Physics model (all distances in "H-units", where 1 unit = 1px of screen height):
- *   position.x_h = xr * (W/H) = xr * aspect
- *   position.y_h = yr
- *   distance_h   = sqrt((Δxr * aspect)² + (Δyr)²)
- *
- * ARM_REACH and FOOT_REACH are fractions of H. At any screen size:
- *   arm_px = ARM_REACH * H  (proportional arm length, matches character scale)
+ * Coordinate system: xr = x/W, yr = y/H (stored)
+ * Distances computed in H-units: dist_h = sqrt((Δxr*aspect)² + Δyr²)
  */
 
-// ── Seeded RNG (Mulberry32) ────────────────────────────────────────────────────
+// ── Seeded RNG ─────────────────────────────────────────────────────────────────
 
 function rng32(seed) {
-  let s = seed >>> 0;
+  let s = (seed >>> 0) || 1;
   return () => {
     s = Math.imul(s ^ (s >>> 15), s | 1);
     s ^= s + Math.imul(s ^ (s >>> 7), s | 61);
@@ -27,20 +26,19 @@ function rng32(seed) {
 export function getSessionSeed() {
   let s = sessionStorage.getItem('bk_seed');
   if (!s) {
-    s = (Date.now() ^ (Math.random() * 0xFFFFFFFF)) >>> 0;
+    s = ((Date.now() ^ (Math.random() * 0xFFFFFFFF)) >>> 0).toString();
     sessionStorage.setItem('bk_seed', s);
   }
   return parseInt(s);
 }
 
-// ── Grade parameters ────────────────────────────────────────────────────────────
-// armReach, footReach: fraction of screen height
-// sequence: ordered limb moves (handL/handR/footL/footR)
-// sideRange: max horizontal spread for generated holds (in xr units each side)
-// vertStep:  preferred vertical step size between hand holds (in yr units)
+// ── Constants ──────────────────────────────────────────────────────────────────
 
+const MIN_HOLD_DIST = 0.10; // minimum separation between any two holds (H-units)
 const HOLD_COLORS_L = [0xA855F7, 0xEF4444, 0x3B82F6];
 const HOLD_COLORS_R = [0xEF4444, 0xA855F7, 0xF97316];
+
+// ── Grade parameters ────────────────────────────────────────────────────────────
 
 export const GRADE_PARAMS = {
   V0: {
@@ -48,7 +46,10 @@ export const GRADE_PARAMS = {
     difficulty:'🟢 Easy', color:0x22C55E, holdScale:1.00,
     pumpRate:4,
     armReach:0.34, footReach:0.24,
-    sideRange:0.13, vertStep:0.15,
+    // How far left/right holds can go (H-units each side)
+    sideRange:0.18,
+    // Minimum vertical step per hand hold (H-units)
+    minVertStep:0.10,
     sequence:['handL','footL','handR','footR','handL','footL','handR'],
     gameoverMsgs:['PUMPED OUT!','THAT WAS A V0, BY THE WAY...','HAVE YOU TRIED USING YOUR FEET?','YOUR FOREARMS HAVE LEFT THE CHAT','GRAVITY: 1 — YOU: 0'],
     winMsg:"The bar is low and you cleared it.\nBut hey — it counts.",
@@ -58,7 +59,7 @@ export const GRADE_PARAMS = {
     difficulty:'🟡 Medium', color:0xF59E0B, holdScale:0.85,
     pumpRate:6,
     armReach:0.33, footReach:0.23,
-    sideRange:0.17, vertStep:0.14,
+    sideRange:0.22, minVertStep:0.09,
     sequence:['handL','footL','handR','footR','handL','footL','handR','footR','handL','handR'],
     gameoverMsgs:['PUMPED OUT!',"BETA SPRAY DIDN'T HELP, HUH?",'TRY THE SEQUENCE AGAIN. SLOWLY.','YOUR FOREARMS FILED FOR DIVORCE','THE WALL IS LAUGHING. I CAN HEAR IT.'],
     winMsg:"Now you're climbing.\nSomeone call Chris Sharma.",
@@ -68,7 +69,7 @@ export const GRADE_PARAMS = {
     difficulty:'🔴 Hard', color:0xEF4444, holdScale:0.72,
     pumpRate:8.5,
     armReach:0.32, footReach:0.22,
-    sideRange:0.20, vertStep:0.13,
+    sideRange:0.26, minVertStep:0.08,
     sequence:['handL','footL','handR','footR','handL','handR','footL','handR','footR'],
     gameoverMsgs:['PUMPED OUT!','HONESTLY, RESPECT FOR TRYING.','THE DYNO SAID NO.','FOREARMS = COOKED. WELL DONE.',"HAVE YOU CONSIDERED YOGA INSTEAD?"],
     winMsg:"ABSOLUTE UNIT. 💪\nThe boulder bows to you.",
@@ -78,7 +79,7 @@ export const GRADE_PARAMS = {
     difficulty:'🟠 Very Hard', color:0xF97316, holdScale:0.62,
     pumpRate:12,
     armReach:0.31, footReach:0.22,
-    sideRange:0.22, vertStep:0.12,
+    sideRange:0.28, minVertStep:0.07,
     sequence:['handL','footL','handR','footR','handL','footL','handR','handR','footR','handL','handR'],
     gameoverMsgs:['PUMPED OUT!','EVEN THE HOLDS ARE JUDGING YOU.','THIS IS YOUR PROJECT NOW. FOREVER.','SPAGHETTI ARMS DETECTED.','THE SEQUENCE WAS RIGHT THERE...'],
     winMsg:"PROJECT SENT.\nYou may now talk about this at every dinner.",
@@ -88,7 +89,7 @@ export const GRADE_PARAMS = {
     difficulty:'🔴 Extreme', color:0xDC2626, holdScale:0.54,
     pumpRate:15,
     armReach:0.30, footReach:0.21,
-    sideRange:0.24, vertStep:0.11,
+    sideRange:0.30, minVertStep:0.07,
     sequence:['handL','footL','handR','footR','handL','footL','handR','footR','handL','footL','handR','handR'],
     gameoverMsgs:['PUMPED OUT!','YOUR TENDONS HAVE FILED A COMPLAINT.','DOCTORS HATE THIS ROUTE.','THAT WAS ACTUALLY IMPRESSIVE. STILL FELL THOUGH.','MINIMUM 2 YEARS TRAINING REQUIRED.'],
     winMsg:"V8?! WHO ARE YOU?!\nSeriously, who are you.",
@@ -98,7 +99,7 @@ export const GRADE_PARAMS = {
     difficulty:'⚫ Legendary', color:0x7C3AED, holdScale:0.46,
     pumpRate:20,
     armReach:0.29, footReach:0.20,
-    sideRange:0.26, vertStep:0.10,
+    sideRange:0.31, minVertStep:0.06,
     sequence:['handL','footL','handR','footR','handL','footL','handR','footR','handL','footL','handR','footR','handL','handR'],
     gameoverMsgs:['PUMPED OUT!','THIS IS A V10. WHAT DID YOU EXPECT.','BOLD STRATEGY. ZERO EXECUTION.','RESPECT. ALSO: LOL.','THE WALL SENDS ITS CONDOLENCES.'],
     winMsg:"YOU ARE THE BOULDER KING.\n👑 Bow. Everyone bow. 👑",
@@ -107,25 +108,21 @@ export const GRADE_PARAMS = {
 
 export const LEVEL_ORDER = ['V0','V2','V4','V6','V8','V10'];
 
-// ── Torso simulation (must match GameScene.updateTorsoTarget) ─────────────────
+// ── Physics helpers (match GameScene formulas exactly) ────────────────────────
 
 function simTorso(state, aspect) {
-  const hands = ['handL','handR'].map(k => state[k]);
-  const feet  = ['footL','footR'].map(k => state[k]);
-  const hx = (hands[0].xr + hands[1].xr) / 2;
-  const hy = (hands[0].yr + hands[1].yr) / 2;
-  const fx = (feet[0].xr  + feet[1].xr)  / 2;
-  const fy = (feet[0].yr  + feet[1].yr)  / 2;
-  // 50/50 hand/foot influence (matches updated GameScene formula)
+  const hx = (state.handL.xr + state.handR.xr) / 2;
+  const hy = (state.handL.yr + state.handR.yr) / 2;
+  const fx = (state.footL.xr + state.footR.xr) / 2;
+  const fy = (state.footL.yr + state.footR.yr) / 2;
   return {
     xr: hx * 0.50 + fx * 0.50,
     yr: (hy + 0.072) * 0.50 + (fy - 0.108) * 0.50,
   };
 }
 
-// Shoulder/hip anchor in xr/yr space (must match GameScene.getLimbAnchor)
-function anchor(torso, key, aspect) {
-  const sh = 0.048, sw = 0.016 * aspect; // same fractions as GameScene
+function limbAnchor(torso, key, aspect) {
+  const sh = 0.048, sw = 0.016 * aspect;
   const hh = 0.038, hw = 0.011 * aspect;
   return {
     handL: { xr: torso.xr - sw, yr: torso.yr - sh },
@@ -135,73 +132,107 @@ function anchor(torso, key, aspect) {
   }[key];
 }
 
-// Distance in H-units between two (xr,yr) positions
-function dist_h(a, b, aspect) {
+function distH(a, b, aspect) {
   const dx = (a.xr - b.xr) * aspect;
-  const dy = (a.yr - b.yr);
+  const dy = a.yr - b.yr;
   return Math.sqrt(dx * dx + dy * dy);
 }
 
-// ── Position sampler ───────────────────────────────────────────────────────────
+// ── Hold placement ─────────────────────────────────────────────────────────────
 
-function samplePosition(anc, reach_h, prevPos, sideRange, isLeft, rng, aspect) {
-  const MAX_TRIES = 40;
+function clearOfAllHolds(candidate, holds, footHolds, aspect) {
+  for (const h of holds)     { if (distH({ xr:h.xr, yr:h.yr }, candidate, aspect) < MIN_HOLD_DIST) return false; }
+  for (const h of footHolds) { if (distH({ xr:h.xr, yr:h.yr }, candidate, aspect) < MIN_HOLD_DIST) return false; }
+  return true;
+}
+
+function sampleHold(anc, reach, prevPos, params, isLeft, isHand, rng, aspect, holds, footHolds) {
+  const MAX_TRIES = 80;
 
   for (let t = 0; t < MAX_TRIES; t++) {
-    // Random angle biased upward (toward -π/2 on unit circle = "up on screen")
-    const rawAngle  = rng() * Math.PI * 2;
-    const upBias    = 0.72 + (t / MAX_TRIES) * 0.20; // increase bias on retry
-    const angle     = rawAngle * (1 - upBias) + (-Math.PI / 2) * upBias;
+    // Angle in the UPWARD hemisphere only: from -π (left) to 0 (right) on unit circle
+    // -π/2 = straight up. Apply side preference gradually.
+    const sideSign = isLeft ? -1 : 1;
+    // Preferred angle: biased toward upper-left (left limbs) or upper-right (right limbs)
+    const preferredAngle = -Math.PI / 2 + sideSign * (params.sideRange * 0.8 + (t / MAX_TRIES) * 0.3);
+    const jitter = (rng() - 0.5) * Math.PI * 0.5; // ±45° jitter
+    let angle = preferredAngle + jitter;
+    // Clamp strictly to upward hemisphere
+    angle = Math.max(-Math.PI + 0.05, Math.min(-0.05, angle));
 
-    // Distance: 55–92% of reach
-    const d = reach_h * (0.55 + rng() * 0.37);
-
-    // Horizontal spread bias: left limbs prefer left, right prefer right
-    const sideBonus = (isLeft ? -1 : 1) * sideRange * rng() * 0.5;
+    // Distance: 65–90% of reach
+    const d = reach * (0.65 + rng() * 0.25);
 
     const candidate = {
-      xr: anc.xr + (Math.cos(angle) * d) / aspect + sideBonus,
-      yr: anc.yr + Math.sin(angle) * d,  // negative sin = up on screen
+      xr: anc.xr + (Math.cos(angle) * d) / aspect,
+      yr: anc.yr + Math.sin(angle) * d,   // sin is negative in upward angles → yr decreases
     };
 
-    // Must be above previous hold for this limb
-    if (candidate.yr >= prevPos.yr - 0.03) continue;
+    // ── Constraints ──────────────────────────────────────────────────────────
 
-    // Must be within wall bounds
-    if (candidate.xr < 0.07 || candidate.xr > 0.93) continue;
-    if (candidate.yr < 0.06 || candidate.yr > 0.80) continue;
+    // 1. Must be strictly above previous hold for this limb
+    if (candidate.yr >= prevPos.yr - params.minVertStep) continue;
 
-    // Verify actual distance from anchor (primary constraint)
-    if (dist_h(anc, candidate, aspect) > reach_h * 1.05) continue;
+    // 2. Wall bounds
+    if (candidate.xr < 0.08 || candidate.xr > 0.92) continue;
+    if (candidate.yr < 0.06 || candidate.yr > 0.78) continue;
+
+    // 3. Actual anchor distance within reach
+    if (distH(anc, candidate, aspect) > reach * 1.02) continue;
+
+    // 4. Minimum distance from ALL existing holds
+    if (!clearOfAllHolds(candidate, holds, footHolds, aspect)) continue;
 
     return candidate;
   }
 
-  // Fallback: place directly above anchor within safe distance
-  return {
-    xr: Math.max(0.10, Math.min(0.90, anc.xr + (isLeft ? -1 : 1) * sideRange * 0.3)),
-    yr: Math.max(0.08, anc.yr - reach_h * 0.65),
+  // Fallback: straight above anchor, relaxed distance check
+  const fallback = {
+    xr: Math.max(0.09, Math.min(0.91, anc.xr + sideSign * 0.08)),
+    yr: Math.max(0.07, prevPos.yr - reach * 0.70),
   };
+  return fallback;
+}
+
+function placeTop(state, params, rng, aspect, holds, footHolds) {
+  const torso  = simTorso(state, aspect);
+  const ancL   = limbAnchor(torso, 'handL', aspect);
+  const ancR   = limbAnchor(torso, 'handR', aspect);
+  // Higher shoulder = lower yr
+  const higherAnc = ancL.yr <= ancR.yr ? ancL : ancR;
+
+  // Place TOP within 70% of arm reach above the higher shoulder
+  const topY = Math.max(0.04, higherAnc.yr - params.armReach * 0.70);
+  let   topX = 0.45 + rng() * 0.10;
+
+  // Shift until clear of all existing holds
+  for (let i = 0; i < 30; i++) {
+    if (clearOfAllHolds({ xr:topX, yr:topY }, holds, footHolds, aspect)) break;
+    topX = 0.42 + rng() * 0.16;
+  }
+
+  const id = `h${holds.length}`;
+  return { id, xr: topX, yr: topY, color: 0xF59E0B, label: 'TOP' };
 }
 
 // ── Main generator ─────────────────────────────────────────────────────────────
 
 export function generateLevel(grade, aspect, seed) {
   const p   = GRADE_PARAMS[grade];
-  const rng = rng32(seed ^ (grade.charCodeAt(0) * 31));
+  const rng = rng32(seed ^ (grade.charCodeAt(0) * 2654435761));
 
   const holds     = [];
   const footHolds = [];
   const beta      = { handL:[], handR:[], footL:[], footR:[] };
 
-  // ── Start holds (center, bottom) ────────────────────────────────────────────
+  // ── Start holds ──────────────────────────────────────────────────────────────
   const sx = 0.50, sy = 0.82;
-  const spread = 0.06 + rng() * 0.03; // slight variation in start spread
+  const spread = 0.055 + rng() * 0.025;
 
-  holds.push({ id:'h0', xr:sx-spread, yr:sy,      color:0x22C55E, label:'START' });
-  holds.push({ id:'h1', xr:sx+spread, yr:sy,      color:0x22C55E, label:'START' });
-  footHolds.push({ id:'f0', xr:sx-spread*0.7, yr:sy+0.06, color:0x6B7280 });
-  footHolds.push({ id:'f1', xr:sx+spread*0.7, yr:sy+0.06, color:0x6B7280 });
+  holds.push({ id:'h0', xr:sx-spread, yr:sy,       color:0x22C55E, label:'START' });
+  holds.push({ id:'h1', xr:sx+spread, yr:sy,       color:0x22C55E, label:'START' });
+  footHolds.push({ id:'f0', xr:sx-spread*0.7, yr:sy+0.055, color:0x6B7280 });
+  footHolds.push({ id:'f1', xr:sx+spread*0.7, yr:sy+0.055, color:0x6B7280 });
 
   beta.handL.push('h0'); beta.handR.push('h1');
   beta.footL.push('f0'); beta.footR.push('f1');
@@ -213,19 +244,18 @@ export function generateLevel(grade, aspect, seed) {
     footR: { xr:footHolds[1].xr, yr:footHolds[1].yr },
   };
 
-  // ── Generate each move ───────────────────────────────────────────────────────
   let colorIdxL = 0, colorIdxR = 0;
 
+  // ── Sequence ─────────────────────────────────────────────────────────────────
   for (const move of p.sequence) {
     const isHand = move.startsWith('hand');
     const isLeft = move.endsWith('L');
     const reach  = isHand ? p.armReach : p.footReach;
 
-    const torso  = simTorso(state, aspect);
-    const anc    = anchor(torso, move, aspect);
-    const prevPos = state[move];
+    const torso = simTorso(state, aspect);
+    const anc   = limbAnchor(torso, move, aspect);
 
-    const pos = samplePosition(anc, reach, prevPos, p.sideRange, isLeft, rng, aspect);
+    const pos = sampleHold(anc, reach, state[move], p, isLeft, isHand, rng, aspect, holds, footHolds);
 
     if (isHand) {
       const id    = `h${holds.length}`;
@@ -241,21 +271,11 @@ export function generateLevel(grade, aspect, seed) {
     state[move] = pos;
   }
 
-  // ── TOP hold ─────────────────────────────────────────────────────────────────
-  // Place above the highest current hand hold, centered
-  const highestY = Math.min(...holds.map(h => h.yr));
-  const topId = `h${holds.length}`;
-  holds.push({
-    id: topId,
-    xr: 0.48 + rng() * 0.04,
-    yr: Math.max(0.04, highestY - 0.05 - rng() * 0.03),
-    color: 0xF59E0B,
-    label: 'TOP',
-  });
-
-  // Both hands route ends at TOP — first one to grab it wins
-  beta.handL.push(topId);
-  beta.handR.push(topId);
+  // ── TOP ───────────────────────────────────────────────────────────────────────
+  const top = placeTop(state, p, rng, aspect, holds, footHolds);
+  holds.push(top);
+  beta.handL.push(top.id);
+  beta.handR.push(top.id);
 
   return { holds, footHolds, beta };
 }
