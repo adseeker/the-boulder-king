@@ -1,0 +1,12 @@
+{
+  "name": "the-boulder-king",
+  "version": "1.0.0",
+  "description": "2D bouldering arcade game for the browser",
+  "scripts": {
+    "dev": "python3 -m http.server 3333",
+    "start": "python3 -m http.server 3333"
+  },
+  "keywords": ["game", "climbing", "bouldering", "phaser", "arcade"],
+  "author": "adseeker",
+  "license": "MIT"
+}

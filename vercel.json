@@ -1,0 +1,12 @@
+{
+  "headers": [
+    {
+      "source": "/(.*\\.(js|mjs))",
+      "headers": [{ "key": "Content-Type", "value": "application/javascript; charset=utf-8" }]
+    },
+    {
+      "source": "/(.*)",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=3600" }]
+    }
+  ]
+}
