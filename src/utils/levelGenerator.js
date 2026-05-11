@@ -148,11 +148,9 @@ function clearOfAllHolds(candidate, holds, footHolds, aspect) {
 
 function sampleHold(anc, reach, prevPos, params, isLeft, isHand, rng, aspect, holds, footHolds) {
   const MAX_TRIES = 80;
+  const sideSign = isLeft ? -1 : 1;  // declared here so fallback can use it
 
   for (let t = 0; t < MAX_TRIES; t++) {
-    // Angle in the UPWARD hemisphere only: from -π (left) to 0 (right) on unit circle
-    // -π/2 = straight up. Apply side preference gradually.
-    const sideSign = isLeft ? -1 : 1;
     // Preferred angle: biased toward upper-left (left limbs) or upper-right (right limbs)
     const preferredAngle = -Math.PI / 2 + sideSign * (params.sideRange * 0.8 + (t / MAX_TRIES) * 0.3);
     const jitter = (rng() - 0.5) * Math.PI * 0.5; // ±45° jitter
