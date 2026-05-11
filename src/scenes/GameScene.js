@@ -55,6 +55,7 @@ export default class GameScene extends Phaser.Scene {
     this.limbProgress      = { handL: 0, handR: 0, footL: 0, footR: 0 };
     this.limbTargets       = {};
     this.limbTargetInReach = {};
+    this.showingHint       = false;
 
     this.state            = 'playing';
     this.pump             = 0;
@@ -492,6 +493,17 @@ export default class GameScene extends Phaser.Scene {
     this.input.keyboard.on('keydown-E', () => this.moveLimb('handR'));
     this.input.keyboard.on('keydown-Z', () => this.moveLimb('footL'));
     this.input.keyboard.on('keydown-X', () => this.moveLimb('footR'));
+    this.input.keyboard.on('keydown-H', () => this.triggerHint());
+  }
+
+  triggerHint() {
+    if (this.state !== 'playing') return;
+    if (this.showingHint) return;
+    // Hint costs pump — trade time for information
+    this.pump = Math.min(100, this.pump + 12);
+    this.showingHint = true;
+    this.showNotif('HINT! (+12 pump)', '#6B7280');
+    this.time.delayedCall(2200, () => { this.showingHint = false; });
   }
 
   moveLimb(key) {
@@ -619,7 +631,9 @@ export default class GameScene extends Phaser.Scene {
   }
 
   updateTargetLabels() {
-    if (this.state !== 'playing') {
+    // Labels are hidden by default — player discovers the sequence themselves.
+    // Shown only briefly when player presses H (hint, costs pump).
+    if (!this.showingHint) {
       Object.values(this.targetLabels).forEach(l => l.setVisible(false));
       return;
     }
@@ -715,10 +729,9 @@ export default class GameScene extends Phaser.Scene {
 
   drawHoldOverlays() {
     const g = this.holdOverlayGfx; g.clear();
-    const limbs    = this.climber.limbs;
-    const occupied = Object.values(limbs).filter(l => l.grabbed).map(l => l.holdId);
+    const limbs = this.climber.limbs;
 
-    // White ring on grabbed holds
+    // Always show white rings on currently grabbed holds
     Object.values(limbs).filter(l => l.grabbed).forEach(limb => {
       const hold = this.allHolds.find(h => h.id === limb.holdId);
       if (!hold) return;
@@ -728,23 +741,21 @@ export default class GameScene extends Phaser.Scene {
 
     if (this.state !== 'playing') return;
 
+    // Only draw target rings when hint is active
+    if (!this.showingHint) return;
+
     const RING_COLORS = { handL:0x60A5FA, handR:0x60A5FA, footL:0xFB923C, footR:0xFB923C };
     const pulse = 0.55 + 0.45 * Math.sin(Date.now() / 180);
 
     Object.entries(this.limbTargets || {}).forEach(([key, hold]) => {
       if (!hold) return;
-      const col      = RING_COLORS[key];
-      const inReach  = this.limbTargetInReach[key];
-      const limb     = limbs[key];
+      const col     = RING_COLORS[key];
+      const inReach = this.limbTargetInReach[key];
+      const limb    = limbs[key];
 
       if (inReach) {
-        // IN REACH — bright ring + dashed arrow from current hold
         g.lineStyle(3, col, 0.60 + pulse * 0.40);
         g.strokeEllipse(hold.x, hold.y, 60, 42);
-        g.lineStyle(1.5, col, 0.20 + pulse * 0.20);
-        g.strokeEllipse(hold.x, hold.y, 74, 54);
-
-        // Dashed line from current limb position → target
         const steps = 7;
         g.lineStyle(1.5, col, 0.40);
         for (let i = 0; i < steps; i += 2) {
@@ -755,11 +766,8 @@ export default class GameScene extends Phaser.Scene {
           g.strokePath();
         }
       } else {
-        // OUT OF REACH — dim orange ring, no arrow: "you need to get closer"
         g.lineStyle(2, 0xFB923C, 0.28 + pulse * 0.18);
         g.strokeEllipse(hold.x, hold.y, 58, 40);
-        g.lineStyle(1, 0xFB923C, 0.12);
-        g.strokeEllipse(hold.x, hold.y, 70, 50);
       }
     });
   }
@@ -894,9 +902,12 @@ export default class GameScene extends Phaser.Scene {
     this.add.rectangle(0, H, W, 44, 0x000000, 0.55).setOrigin(0,1);
     [{ key:'Q',label:'Hand L',col:'#60A5FA' },{ key:'E',label:'Hand R',col:'#60A5FA' },
      { key:'Z',label:'Foot L',col:'#FB923C' },{ key:'X',label:'Foot R',col:'#FB923C' }]
-    .forEach((c,i) => this.add.text(W/2-185+i*122, H-22, `[${c.key}] ${c.label}`, {
+    .forEach((c,i) => this.add.text(W/2-200+i*122, H-22, `[${c.key}] ${c.label}`, {
       fontSize:'13px', fontFamily:'Arial Black', color:c.col,
     }).setOrigin(0,0.5));
+    this.add.text(W/2+295, H-22, '[H] Hint  (-12 pump)', {
+      fontSize:'11px', fontFamily:'Arial', color:'#4B5563',
+    }).setOrigin(0, 0.5);
 
     this.add.text(W-120, H-30, 'PUMP', { fontSize:'10px', fontFamily:'Arial Black', color:'#FF6B35' }).setOrigin(0,0.5);
     this.add.rectangle(W-120, H-16, 104, 10, 0x333333).setOrigin(0,0.5);
