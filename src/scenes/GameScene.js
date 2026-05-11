@@ -34,12 +34,27 @@ export default class GameScene extends Phaser.Scene {
   // ── Lifecycle ───────────────────────────────────────────────────────────────
 
   create() {
+    try { this._create(); }
+    catch (err) {
+      console.error('GameScene.create() ERROR:', err);
+      this.add.text(this.scale.width/2, this.scale.height/2,
+        'ERROR: ' + err.message, { fontSize: '18px', color: '#EF4444', wordWrap: { width: this.scale.width - 40 } }
+      ).setOrigin(0.5);
+    }
+  }
+
+  _create() {
     const W = this.scale.width;
     const H = this.scale.height;
     this.W = W; this.H = H;
 
     this.levelConfig = LEVELS[this.scene.settings.data?.level || 'V0'];
     this.outfit      = getOutfit();
+
+    // Initialise before ANY Phaser callback can fire (update runs same frame as create)
+    this.limbProgress      = { handL: 0, handR: 0, footL: 0, footR: 0 };
+    this.limbTargets       = {};
+    this.limbTargetInReach = {};
 
     this.state            = 'playing';
     this.pump             = 0;
@@ -63,9 +78,6 @@ export default class GameScene extends Phaser.Scene {
     this.createClimber(W, H);
     this.climberGfx     = this.add.graphics();
 
-    this.limbTargets      = {};
-    this.limbTargetInReach = {};
-    this.limbProgress     = { handL: 0, handR: 0, footL: 0, footR: 0 };
     this.setupInput();
     this.setupHUD(W, H);
     this.setupTargetLabels();
@@ -150,6 +162,7 @@ export default class GameScene extends Phaser.Scene {
   // ── Win / Fall triggers ─────────────────────────────────────────────────────
 
   checkWin() {
+    if (!this.levelConfig?.beta || !this.limbProgress) return false;
     const beta = this.levelConfig.beta;
     return ['handL', 'handR'].some(key => {
       const route = beta[key];
