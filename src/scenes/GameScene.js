@@ -996,8 +996,6 @@ export default class GameScene extends Phaser.Scene {
 
   setupHUD(W, H) {
     const lv = this.levelConfig;
-    this.add.rectangle(W/2, 0, W, 44, 0x000000, 0.55).setOrigin(0.5,0);
-    this.add.text(W/2, 22, 'THE BOULDER KING', { fontSize:'20px', fontFamily:'Arial Black', color:'#FF6B35' }).setOrigin(0.5);
     // ≡ menu button — top left
     const menuBtn = this.add.text(16, 22, '≡', {
       fontSize: '22px', fontFamily: 'Arial Black', color: '#6B7280',
