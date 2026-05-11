@@ -536,14 +536,14 @@ export default class GameScene extends Phaser.Scene {
     const limb   = this.climber.limbs[key];
     const isHand = key.startsWith('hand');
     const ctx    = this.sound.context;
-    const target = this.limbTargets[key];
+    const target     = this.limbTargets[key];
+    if (!target) return; // no more moves in beta — no cost
 
-    // No more moves on this beta route
-    if (!target) return;
+    const attemptCost = this.levelConfig.pumpRate * 0.30; // effort of trying
 
     if (!this.limbTargetInReach[key]) {
-      // Target visible but out of reach → penalise + tell player to reposition
-      this.pump = Math.min(100, this.pump + 4);
+      // Failed attempt: pump goes up, no relief, reposition feedback
+      this.pump = Math.min(100, this.pump + attemptCost);
       this.cameras.main.shake(120, 0.004);
       const bang = this.add.text(target.x, target.y - 28, 'REPOSITION FIRST', {
         fontSize: '12px', fontFamily: 'Arial Black', color: '#FB923C',
@@ -553,13 +553,14 @@ export default class GameScene extends Phaser.Scene {
       return;
     }
 
-    // Move to next beta hold
+    // Successful grab: pump up (effort) then immediately down (relief on new hold)
+    const relief = this.levelConfig.pumpRate * 0.18;
+    this.pump = Math.min(100, this.pump + attemptCost); // up first
     limb.holdId = target.id; limb.x = target.x; limb.y = target.y;
     limb.grabbed = true;
     this.limbProgress[key]++;
     this.moves++;
-    // Small pump recovery: resting on a new hold
-    this.pump = Math.max(0, this.pump - 3);
+    this.pump = Math.max(0, this.pump - relief); // then partial relief
     playGrab(ctx);
     this.chalkPuff(target.x, target.y);
     this.showGrabText(target.x, target.y, isHand);
@@ -612,36 +613,19 @@ export default class GameScene extends Phaser.Scene {
   }
 
   // ── Pump rate (per second) ─────────────────────────────────────────────────
-  // Formula: timeFactor + armStress + footPenalty - footRecovery
-  //  • timeFactor   : always positive, grows logarithmically with elapsed time
-  //  • armStress    : per free hand — you're gripping harder with the other
-  //  • footPenalty  : per foot off holds — body weight falls on arms
-  //  • footRecovery : well-placed feet let you rest; capped so time always matters
+  // Simple state-based model — three foot conditions, danger zone for no hands
   computePumpRate() {
-    const L   = this.climber.limbs;
-    const hG  = ['handL','handR'].filter(k => L[k].grabbed).length; // hands grabbed
-    const fG  = ['footL','footR'].filter(k => L[k].grabbed).length; // feet grabbed
-    const pr  = this.levelConfig.pumpRate;
-    const t   = this.elapsed;
+    const L  = this.climber.limbs;
+    const pr = this.levelConfig.pumpRate;
+    const handsGrabbed = ['handL','handR'].filter(k => L[k].grabbed).length;
+    const feetGrabbed  = ['footL','footR'].filter(k => L[k].grabbed).length;
 
-    // Baseline — logarithmic so early seconds give breathing room
-    const timeFactor = pr * 0.16 * (1 + Math.log1p(t / 20));
+    if (handsGrabbed === 0) return pr * 2.0;  // no hands — very fast
 
-    // Each free hand adds arm stress
-    const armStress  = (2 - hG) * pr * 0.45;
-
-    // Each foot off holds adds body-weight load on arms
-    const footPenalty = (2 - fG) * pr * 0.20;
-
-    // Feet on holds reduce pump — capped at 80% of timeFactor
-    // so the time variable always has some effect
-    const rawRecovery  = hG >= 1 ? fG * pr * 0.30 : 0;
-    const footRecovery = Math.min(timeFactor * 0.80, rawRecovery);
-
-    // Minimum rate — grows slowly with time so pump eventually fills no matter what
-    const minRate = Math.max(pr * 0.04, pr * 0.025 * (t / 30));
-
-    return Math.max(minRate, timeFactor + armStress + footPenalty - footRecovery);
+    // comfortable (2 feet): pr*0.20  /s
+    // 1 foot off:           pr*0.40  /s
+    // no feet:              pr*0.60  /s
+    return pr * (0.20 + (2 - feetGrabbed) * 0.20);
   }
 
   // Shoulder/hip anchor — proportional so it works at any screen size
