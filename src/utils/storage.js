@@ -1,4 +1,4 @@
-import { LEVEL_ORDER } from '../config/levels.js';
+import { LEVEL_ORDER } from '../utils/levelGenerator.js';
 import { OUTFITS, OUTFIT_ORDER } from '../config/outfits.js';
 
 const KEY = 'boulder_king_v1';

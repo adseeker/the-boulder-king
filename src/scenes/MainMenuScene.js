@@ -1,4 +1,4 @@
-import { LEVELS, LEVEL_ORDER }       from '../config/levels.js';
+import { GRADE_PARAMS as LEVELS, LEVEL_ORDER } from '../utils/levelGenerator.js';
 import { OUTFITS, OUTFIT_ORDER }     from '../config/outfits.js';
 import { load, setOutfit, levelState, isOutfitUnlocked } from '../utils/storage.js';
 

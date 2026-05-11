@@ -1,8 +1,11 @@
-import { LEVELS, LEVEL_ORDER }                          from '../config/levels.js';
+import { GRADE_PARAMS, LEVEL_ORDER, generateLevel, getSessionSeed } from '../utils/levelGenerator.js';
 import { OUTFITS }                                       from '../config/outfits.js';
 import { getOutfit, markComplete, checkOutfitUnlock }   from '../utils/storage.js';
 import { playGrab, playRelease, playFall, playSplat,
          playWin, playHeartbeat }                        from '../utils/sounds.js';
+
+// Keep LEVELS alias for MainMenuScene compat (storage.js uses LEVEL_ORDER only)
+const LEVELS = GRADE_PARAMS;
 
 const hex = n => '#' + n.toString(16).padStart(6, '0');
 
@@ -48,8 +51,10 @@ export default class GameScene extends Phaser.Scene {
     const H = this.scale.height;
     this.W = W; this.H = H;
 
-    this.levelConfig = LEVELS[this.scene.settings.data?.level || 'V0'];
+    this.levelConfig = GRADE_PARAMS[this.scene.settings.data?.level || 'V0'];
     this.outfit      = getOutfit();
+    // Character scale — everything proportional to screen height
+    this.cs = Math.min(W, H) / 720;
 
     // Initialise before ANY Phaser callback can fire (update runs same frame as create)
     this.limbProgress      = { handL: 0, handR: 0, footL: 0, footR: 0 };
@@ -557,15 +562,21 @@ export default class GameScene extends Phaser.Scene {
 
     let tx, ty;
     if (hands.length) {
-      tx = hands.reduce((s,h) => s+h.x,0) / hands.length;
-      ty = hands.reduce((s,h) => s+h.y,0) / hands.length + 52;
+      const hx = hands.reduce((s,h) => s+h.x,0) / hands.length;
+      const hy = hands.reduce((s,h) => s+h.y,0) / hands.length;
       if (feet.length) {
-        tx = tx*0.65 + feet.reduce((s,f) => s+f.x,0)/feet.length*0.35;
-        ty = ty*0.60 + (feet.reduce((s,f) => s+f.y,0)/feet.length - 78)*0.40;
+        const fx = feet.reduce((s,f) => s+f.x,0) / feet.length;
+        const fy = feet.reduce((s,f) => s+f.y,0) / feet.length;
+        // 50/50 — feet are load-bearing, they constrain the torso
+        tx = hx * 0.50 + fx * 0.50;
+        ty = (hy + 0.072 * this.H) * 0.50 + (fy - 0.108 * this.H) * 0.50;
+      } else {
+        tx = hx;
+        ty = hy + 0.072 * this.H;
       }
     } else {
       tx = feet.reduce((s,f) => s+f.x,0) / feet.length;
-      ty = feet.reduce((s,f) => s+f.y,0) / feet.length - 80;
+      ty = feet.reduce((s,f) => s+f.y,0) / feet.length - 0.108 * this.H;
     }
     this.climber.torsoTarget = {
       x: Phaser.Math.Clamp(tx, 40, this.W-40),
@@ -581,6 +592,7 @@ export default class GameScene extends Phaser.Scene {
   // Shoulder/hip anchor — proportional so it works at any screen size
   getLimbAnchor(key) {
     const tx = this.climber.torso.x, ty = this.climber.torso.y;
+    // Anchor offsets match generator (0.048H, 0.016*aspect, etc.) — scale with cs
     const sh = this.H * 0.048, sw = this.W * 0.016;
     const hh = this.H * 0.038, hw = this.W * 0.011;
     return {
@@ -597,7 +609,10 @@ export default class GameScene extends Phaser.Scene {
     this.limbTargets      = {};
     this.limbTargetInReach = {};
 
-    const REACH = { handL: this.H * 0.58, handR: this.H * 0.58, footL: this.H * 0.44, footR: this.H * 0.44 };
+    // Reach proportional to screen height, capped at grade's arm/foot reach
+    const ar = this.levelConfig.armReach  * this.H;
+    const fr = this.levelConfig.footReach * this.H;
+    const REACH = { handL: ar, handR: ar, footL: fr, footR: fr };
 
     Object.keys(this.climber.limbs).forEach(key => {
       const hold = this.getNextBetaHold(key);
@@ -702,9 +717,13 @@ export default class GameScene extends Phaser.Scene {
   }
 
   setupHolds(W, H) {
-    const lv = this.levelConfig;
-    this.holds     = lv.holds.map(h => ({...h, x:h.xr*W, y:h.yr*H}));
-    this.footHolds = lv.footHolds.map(h => ({...h, x:h.xr*W, y:h.yr*H}));
+    const seed = getSessionSeed();
+    const gen  = generateLevel(this.levelConfig.grade, W / H, seed);
+    // Inject generated beta and holds back into levelConfig (for checkWin etc.)
+    this.levelConfig = { ...this.levelConfig, ...gen, beta: gen.beta };
+
+    this.holds     = gen.holds.map(h => ({...h, x:h.xr*W, y:h.yr*H}));
+    this.footHolds = gen.footHolds.map(h => ({...h, x:h.xr*W, y:h.yr*H}));
     this.allHolds  = [...this.holds, ...this.footHolds];
   }
 
@@ -802,43 +821,44 @@ export default class GameScene extends Phaser.Scene {
     const { torso, limbs } = this.climber;
     const sx = torso.x + this.shakeX; const sy = torso.y;
 
-    const headCY = sy-58, neckY=sy-36, shldrY=sy-26;
-    const shldrLX=sx-20, shldrRX=sx+20, hipY=sy+26, hipLX=sx-14, hipRX=sx+14;
-    const SKIN=0xC8845A, SHIRT=this.outfit.shirt, SHORT=0x1E293B, SHOE=this.outfit.shoe, SOLE=this.outfit.sole, LW=15;
+    const cs  = this.cs;
+    const headCY = sy-58*cs, neckY=sy-36*cs, shldrY=sy-26*cs;
+    const shldrLX=sx-20*cs, shldrRX=sx+20*cs, hipY=sy+26*cs, hipLX=sx-14*cs, hipRX=sx+14*cs;
+    const SKIN=0xC8845A, SHIRT=this.outfit.shirt, SHORT=0x1E293B, SHOE=this.outfit.shoe, SOLE=this.outfit.sole, LW=15*cs;
 
-    this.drawLimb(g, shldrRX, shldrY, limbs.handR.x, limbs.handR.y, SKIN, LW-1,  1);
-    g.fillStyle(SKIN); g.fillCircle(limbs.handR.x, limbs.handR.y, 8);
-    this.drawLimb(g, hipRX, hipY, limbs.footR.x, limbs.footR.y, SKIN, LW+1, -1);
-    this.drawShoe(g, limbs.footR.x, limbs.footR.y, SHOE, SOLE);
+    this.drawLimb(g, shldrRX, shldrY, limbs.handR.x, limbs.handR.y, SKIN, LW-cs,  1);
+    g.fillStyle(SKIN); g.fillCircle(limbs.handR.x, limbs.handR.y, 8*cs);
+    this.drawLimb(g, hipRX, hipY, limbs.footR.x, limbs.footR.y, SKIN, LW+cs, -1);
+    this.drawShoe(g, limbs.footR.x, limbs.footR.y, SHOE, SOLE, cs);
 
-    g.fillStyle(SHIRT); g.fillRoundedRect(sx-22, shldrY, 44, hipY-shldrY+6, {tl:10,tr:10,bl:4,br:4});
-    g.fillStyle(0x000000,0.08); g.fillEllipse(sx, shldrY+4, 28, 10);
-    g.fillStyle(SHORT); g.fillRoundedRect(sx-20, hipY-2, 40, 26, {tl:4,tr:4,bl:8,br:8});
-    g.lineStyle(2, 0x0F172A, 0.5); g.beginPath(); g.moveTo(sx-20,hipY-2); g.lineTo(sx+20,hipY-2); g.strokePath();
+    g.fillStyle(SHIRT); g.fillRoundedRect(sx-22*cs, shldrY, 44*cs, hipY-shldrY+6*cs, {tl:10*cs,tr:10*cs,bl:4*cs,br:4*cs});
+    g.fillStyle(0x000000,0.08); g.fillEllipse(sx, shldrY+4*cs, 28*cs, 10*cs);
+    g.fillStyle(SHORT); g.fillRoundedRect(sx-20*cs, hipY-2*cs, 40*cs, 26*cs, {tl:4*cs,tr:4*cs,bl:8*cs,br:8*cs});
+    g.lineStyle(2, 0x0F172A, 0.5); g.beginPath(); g.moveTo(sx-20*cs,hipY-2*cs); g.lineTo(sx+20*cs,hipY-2*cs); g.strokePath();
 
-    this.drawLimb(g, hipLX, hipY, limbs.footL.x, limbs.footL.y, SKIN, LW+1, 1);
-    this.drawShoe(g, limbs.footL.x, limbs.footL.y, SHOE, SOLE);
-    this.drawLimb(g, shldrLX, shldrY, limbs.handL.x, limbs.handL.y, SKIN, LW-1, -1);
-    g.fillStyle(SKIN); g.fillCircle(limbs.handL.x, limbs.handL.y, 8);
+    this.drawLimb(g, hipLX, hipY, limbs.footL.x, limbs.footL.y, SKIN, LW+cs, 1);
+    this.drawShoe(g, limbs.footL.x, limbs.footL.y, SHOE, SOLE, cs);
+    this.drawLimb(g, shldrLX, shldrY, limbs.handL.x, limbs.handL.y, SKIN, LW-cs, -1);
+    g.fillStyle(SKIN); g.fillCircle(limbs.handL.x, limbs.handL.y, 8*cs);
 
-    g.fillStyle(0xF1F5F9); g.fillEllipse(sx+26, sy+10, 18, 22);
-    g.lineStyle(2,0xCBD5E1); g.strokeEllipse(sx+26, sy+10, 18, 22);
-    g.fillStyle(0xFFFFFF,0.6); g.fillCircle(sx+26, sy+2, 5);
+    g.fillStyle(0xF1F5F9); g.fillEllipse(sx+26*cs, sy+10*cs, 18*cs, 22*cs);
+    g.lineStyle(2,0xCBD5E1); g.strokeEllipse(sx+26*cs, sy+10*cs, 18*cs, 22*cs);
+    g.fillStyle(0xFFFFFF,0.6); g.fillCircle(sx+26*cs, sy+2*cs, 5*cs);
 
-    g.fillStyle(SKIN); g.fillRoundedRect(sx-7, neckY, 14, 18, 4); g.fillCircle(sx, headCY, 24);
-    g.fillStyle(0x1C0A00); g.fillEllipse(sx, headCY-10, 44, 26); g.fillCircle(sx-20, headCY-2, 9); g.fillCircle(sx+20, headCY-2, 9);
-    g.fillStyle(SKIN); g.fillCircle(sx-23, headCY+4, 7); g.fillCircle(sx+23, headCY+4, 7);
+    g.fillStyle(SKIN); g.fillRoundedRect(sx-7*cs, neckY, 14*cs, 18*cs, 4*cs); g.fillCircle(sx, headCY, 24*cs);
+    g.fillStyle(0x1C0A00); g.fillEllipse(sx, headCY-10*cs, 44*cs, 26*cs); g.fillCircle(sx-20*cs, headCY-2*cs, 9*cs); g.fillCircle(sx+20*cs, headCY-2*cs, 9*cs);
+    g.fillStyle(SKIN); g.fillCircle(sx-23*cs, headCY+4*cs, 7*cs); g.fillCircle(sx+23*cs, headCY+4*cs, 7*cs);
 
     if (this.pump > 60 && this.state === 'playing') {
       const a = Math.min(1, (this.pump-60)/35);
-      g.fillStyle(0x93C5FD, a); g.fillEllipse(sx+30, headCY+8, 7, 10);
-      g.fillTriangle(sx+27, headCY+3, sx+33, headCY+3, sx+30, headCY+15);
+      g.fillStyle(0x93C5FD, a); g.fillEllipse(sx+30*cs, headCY+8*cs, 7*cs, 10*cs);
+      g.fillTriangle(sx+27*cs, headCY+3*cs, sx+33*cs, headCY+3*cs, sx+30*cs, headCY+15*cs);
     }
 
-    this.drawFace(g, sx, headCY, this.getFaceMode());
+    this.drawFace(g, sx, headCY, this.getFaceMode(), cs);
   }
 
-  drawFace(g, tx, cy, mode) {
+  drawFace(g, tx, cy, mode, cs = 1) {
     if (mode === 'scream' || mode === 'terrified') {
       g.fillStyle(0xFFFFFF); g.fillEllipse(tx-8,cy+1,13,16); g.fillEllipse(tx+8,cy+1,13,16);
       g.fillStyle(0x1C1C1C); g.fillCircle(tx-8,cy+3,5); g.fillCircle(tx+8,cy+3,5);
@@ -883,11 +903,11 @@ export default class GameScene extends Phaser.Scene {
     g.fillStyle(color); g.fillCircle(jx, jy, width/2);
   }
 
-  drawShoe(g, x, y, color, sole) {
-    g.fillStyle(sole); g.fillEllipse(x+2, y+8, 28, 10);
-    g.fillStyle(color); g.fillEllipse(x, y+2, 26, 14);
-    g.fillRoundedRect(x-13, y-4, 26, 12, 4);
-    g.fillStyle(0xFFFFFF,0.3); g.fillEllipse(x-4, y-2, 10, 6);
+  drawShoe(g, x, y, color, sole, cs = 1) {
+    g.fillStyle(sole); g.fillEllipse(x+2*cs, y+8*cs, 28*cs, 10*cs);
+    g.fillStyle(color); g.fillEllipse(x, y+2*cs, 26*cs, 14*cs);
+    g.fillRoundedRect(x-13*cs, y-4*cs, 26*cs, 12*cs, 4*cs);
+    g.fillStyle(0xFFFFFF,0.3); g.fillEllipse(x-4*cs, y-2*cs, 10*cs, 6*cs);
   }
 
   // ── HUD ─────────────────────────────────────────────────────────────────────
