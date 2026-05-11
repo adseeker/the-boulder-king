@@ -114,8 +114,9 @@ export default class GameScene extends Phaser.Scene {
     // No free-state dangling in beta mode — limbs always on holds.
     // (Free state only happens on fall, handled in updateFalling)
 
-    this.pump = Math.min(100, this.pump + this.levelConfig.pumpRate * dt);
-    this.shakeX   = this.pump > 65 ? Math.sin(Date.now() / 55) * ((this.pump - 65) / 12) : 0;
+    const pumpRate = this.computePumpRate();
+    this.pump  = Math.min(100, Math.max(0, this.pump + pumpRate * dt));
+    this.shakeX = this.pump > 65 ? Math.sin(Date.now() / 55) * ((this.pump - 65) / 12) : 0;
 
     if (!this.pumpNotif70 && this.pump > 70) { this.pumpNotif70 = true; this.showNotif('GETTING PUMPED...', '#F59E0B'); }
     if (!this.pumpNotif90 && this.pump > 90) { this.pumpNotif90 = true; this.showNotif('HOLD ON!!!', '#EF4444'); }
@@ -204,11 +205,13 @@ export default class GameScene extends Phaser.Scene {
     const lv       = this.levelConfig;
     const s        = Math.floor(this.elapsed);
     const optMoves = (lv.sequence?.length || 7) + 1;
-    const score    = Math.max(50,
-      1000
-      - Math.max(0, (this.moves - optMoves) * 25) // extra moves penalty
-      - s * 3                                       // time penalty
-    );
+
+    // Three components, each 0–100 — total 0–300
+    const pumpScore = Math.round((1 - this.pump / 100) * 100);
+    const moveScore = Math.max(0, 100 - Math.max(0, this.moves - optMoves) * 10);
+    const timeScore = Math.max(0, 100 - s * 2);
+    const totalScore = pumpScore + moveScore + timeScore;
+    const score = Math.round(totalScore / 300 * 1000);
 
     // Check outfit unlock BEFORE marking complete (markComplete changes state)
     const newOutfitId = checkOutfitUnlock(lv.grade);
@@ -221,7 +224,7 @@ export default class GameScene extends Phaser.Scene {
       });
     }
 
-    this.time.delayedCall(newOutfitId ? 1800 : 200, () => this.showWin(score));
+    this.time.delayedCall(newOutfitId ? 1800 : 200, () => this.showWin(score, totalScore));
   }
 
   // ── Overlays: game over / win ───────────────────────────────────────────────
@@ -254,15 +257,15 @@ export default class GameScene extends Phaser.Scene {
     this.input.keyboard.once('keydown-R', () => this.scene.restart());
   }
 
-  showWin(score = 500) {
+  showWin(score = 500, totalScore = 150) {
     const W = this.W; const H = this.H;
     const lv    = this.levelConfig;
     const s     = Math.floor(this.elapsed);
     const mm    = String(Math.floor(s/60)).padStart(2,'0');
     const ss    = String(s%60).padStart(2,'0');
 
-    // Stars based on pump remaining — how much energy you used
-    const stars = this.pump < 35 ? '⭐⭐⭐' : this.pump < 65 ? '⭐⭐' : '⭐';
+    // Stars from combined score (pump 0–100 + moves 0–100 + time 0–100 = 0–300)
+    const stars = totalScore >= 240 ? '⭐⭐⭐' : totalScore >= 160 ? '⭐⭐' : '⭐';
 
     this.add.rectangle(W/2, H/2, W, H, 0x000000, 0.72).setOrigin(0.5);
     this.add.text(W/2, H*0.11, '👑', { fontSize: '72px' }).setOrigin(0.5);
@@ -281,7 +284,7 @@ export default class GameScene extends Phaser.Scene {
     }).setOrigin(0.5);
     this.add.text(W/2, H*0.62, stars, { fontSize: '34px' }).setOrigin(0.5);
     this.add.text(W/2, H*0.69,
-      this.pump < 35 ? 'Perfect send!' : this.pump < 65 ? 'Solid effort' : 'Barely made it',
+      totalScore >= 240 ? 'Clean send!' : totalScore >= 160 ? 'Solid effort' : 'Barely made it!',
       { fontSize: '13px', fontFamily: 'Arial', color: '#6B7280' }).setOrigin(0.5);
 
     // Row 1: RETRY + NEXT or MAIN MENU
@@ -555,6 +558,8 @@ export default class GameScene extends Phaser.Scene {
     limb.grabbed = true;
     this.limbProgress[key]++;
     this.moves++;
+    // Small pump recovery: resting on a new hold
+    this.pump = Math.max(0, this.pump - 3);
     playGrab(ctx);
     this.chalkPuff(target.x, target.y);
     this.showGrabText(target.x, target.y, isHand);
@@ -604,6 +609,39 @@ export default class GameScene extends Phaser.Scene {
   getFreePos(key) {
     const tx = this.climber.torso.x; const ty = this.climber.torso.y;
     return { handL:{x:tx-48,y:ty+12}, handR:{x:tx+48,y:ty+12}, footL:{x:tx-22,y:ty+68}, footR:{x:tx+22,y:ty+68} }[key];
+  }
+
+  // ── Pump rate (per second) ─────────────────────────────────────────────────
+  // Formula: timeFactor + armStress + footPenalty - footRecovery
+  //  • timeFactor   : always positive, grows logarithmically with elapsed time
+  //  • armStress    : per free hand — you're gripping harder with the other
+  //  • footPenalty  : per foot off holds — body weight falls on arms
+  //  • footRecovery : well-placed feet let you rest; capped so time always matters
+  computePumpRate() {
+    const L   = this.climber.limbs;
+    const hG  = ['handL','handR'].filter(k => L[k].grabbed).length; // hands grabbed
+    const fG  = ['footL','footR'].filter(k => L[k].grabbed).length; // feet grabbed
+    const pr  = this.levelConfig.pumpRate;
+    const t   = this.elapsed;
+
+    // Baseline — logarithmic so early seconds give breathing room
+    const timeFactor = pr * 0.16 * (1 + Math.log1p(t / 20));
+
+    // Each free hand adds arm stress
+    const armStress  = (2 - hG) * pr * 0.45;
+
+    // Each foot off holds adds body-weight load on arms
+    const footPenalty = (2 - fG) * pr * 0.20;
+
+    // Feet on holds reduce pump — capped at 80% of timeFactor
+    // so the time variable always has some effect
+    const rawRecovery  = hG >= 1 ? fG * pr * 0.30 : 0;
+    const footRecovery = Math.min(timeFactor * 0.80, rawRecovery);
+
+    // Minimum rate — grows slowly with time so pump eventually fills no matter what
+    const minRate = Math.max(pr * 0.04, pr * 0.025 * (t / 30));
+
+    return Math.max(minRate, timeFactor + armStress + footPenalty - footRecovery);
   }
 
   // Shoulder/hip anchor — proportional so it works at any screen size
