@@ -488,18 +488,25 @@ export default class GameScene extends Phaser.Scene {
     const ctx    = this.sound.context;
 
     if (limb.grabbed) {
-      limb.grabbed = false; limb.holdId = null;
-      playRelease(ctx);
+      // Try to move to a DIFFERENT hold first (don't require explicit release)
+      const next = this.getBestTarget(key, { exclude: [limb.holdId] });
+      if (next) {
+        // Direct move: old hold released + new hold grabbed in one action
+        limb.holdId = next.id; limb.x = next.x; limb.y = next.y;
+        this.moves++;
+        playGrab(ctx);
+        this.chalkPuff(next.x, next.y);
+        this.showGrabText(next.x, next.y, isHand);
+      } else {
+        // No other hold reachable → release (intentional drop)
+        limb.grabbed = false; limb.holdId = null;
+        playRelease(ctx);
+      }
     } else {
-      const target = this.limbTargets[key];
+      // Free: grab any nearest hold (including the one just released)
+      const target = this.getBestTarget(key);
       if (!target) {
-        // No holds in reach — give clear feedback
         this.cameras.main.shake(130, 0.005);
-        const bang = this.add.text(limb.x, limb.y - 18, 'OUT OF REACH', {
-          fontSize: '13px', fontFamily: 'Arial Black', color: '#EF4444',
-          stroke: '#000', strokeThickness: 3,
-        }).setOrigin(0.5);
-        this.tweens.add({ targets: bang, y: bang.y - 28, alpha: 0, duration: 600, onComplete: () => bang.destroy() });
         return;
       }
       limb.x = target.x; limb.y = target.y;
@@ -511,6 +518,25 @@ export default class GameScene extends Phaser.Scene {
     }
     this.updateTorsoTarget();
     this.recalcTargets();
+  }
+
+  // Central reach function — proportional to screen height, no fixed pixels
+  getBestTarget(key, { exclude = [] } = {}) {
+    const isHand   = key.startsWith('hand');
+    const REACH    = isHand ? this.H * 0.52 : this.H * 0.38;
+    const anchor   = this.getLimbAnchor(key);
+    const limbs    = this.climber.limbs;
+    const occupied = Object.entries(limbs)
+      .filter(([k, l]) => k !== key && l.grabbed)
+      .map(([, l]) => l.holdId);
+
+    return this.allHolds
+      .filter(h => !occupied.includes(h.id) && !exclude.includes(h.id))
+      .filter(h => Phaser.Math.Distance.Between(anchor.x, anchor.y, h.x, h.y) <= REACH)
+      .sort((a, b) =>
+        Phaser.Math.Distance.Between(anchor.x, anchor.y, a.x, a.y) -
+        Phaser.Math.Distance.Between(anchor.x, anchor.y, b.x, b.y)
+      )[0] || null;
   }
 
   updateTorsoTarget() {
@@ -542,35 +568,35 @@ export default class GameScene extends Phaser.Scene {
     return { handL:{x:tx-48,y:ty+12}, handR:{x:tx+48,y:ty+12}, footL:{x:tx-22,y:ty+68}, footR:{x:tx+22,y:ty+68} }[key];
   }
 
-  // Shoulder / hip anchor for reach calculation (more realistic than torso center)
+  // Shoulder / hip anchor — proportional offsets so it works at any screen size
   getLimbAnchor(key) {
     const tx = this.climber.torso.x, ty = this.climber.torso.y;
+    const sh = this.H * 0.048; // shoulder height above torso center
+    const sw = this.W * 0.016; // shoulder lateral offset
+    const hh = this.H * 0.038; // hip height below torso center
+    const hw = this.W * 0.011; // hip lateral offset
     return {
-      handL: { x: tx - 20, y: ty - 35 },
-      handR: { x: tx + 20, y: ty - 35 },
-      footL: { x: tx - 14, y: ty + 28 },
-      footR: { x: tx + 14, y: ty + 28 },
+      handL: { x: tx - sw, y: ty - sh },
+      handR: { x: tx + sw, y: ty - sh },
+      footL: { x: tx - hw, y: ty + hh },
+      footR: { x: tx + hw, y: ty + hh },
     }[key];
   }
 
-  // Pre-calculate which hold each FREE limb will target next frame
+  // Pre-calculate targets for ALL limbs:
+  //   free limbs  → nearest grab target
+  //   grabbed limbs → nearest NEXT hold (where they'll go on next press)
   recalcTargets() {
     if (this.state !== 'playing') return;
-    const REACH  = { handL: 340, handR: 340, footL: 220, footR: 220 };
-    const limbs  = this.climber.limbs;
-    const occupied = Object.values(limbs).filter(l => l.grabbed).map(l => l.holdId);
-
     this.limbTargets = {};
-    Object.entries(limbs).filter(([, l]) => !l.grabbed).forEach(([key]) => {
-      const anchor = this.getLimbAnchor(key);
-      const best   = this.allHolds
-        .filter(h => !occupied.includes(h.id))
-        .filter(h => Phaser.Math.Distance.Between(anchor.x, anchor.y, h.x, h.y) <= REACH[key])
-        .sort((a, b) =>
-          Phaser.Math.Distance.Between(anchor.x, anchor.y, a.x, a.y) -
-          Phaser.Math.Distance.Between(anchor.x, anchor.y, b.x, b.y)
-        )[0] || null;
-      this.limbTargets[key] = best;
+    Object.entries(this.climber.limbs).forEach(([key, limb]) => {
+      if (limb.grabbed) {
+        // Show where hand/foot WILL MOVE to on next press
+        this.limbTargets[key] = this.getBestTarget(key, { exclude: [limb.holdId] });
+      } else {
+        // Show where free limb will grab
+        this.limbTargets[key] = this.getBestTarget(key);
+      }
     });
   }
 
@@ -593,11 +619,13 @@ export default class GameScene extends Phaser.Scene {
   }
 
   updateTargetLabels() {
-    const limbs = this.climber.limbs;
+    if (this.state !== 'playing') {
+      Object.values(this.targetLabels).forEach(l => l.setVisible(false));
+      return;
+    }
     Object.entries(this.targetLabels).forEach(([key, label]) => {
       const hold = this.limbTargets[key];
-      const limb = limbs[key];
-      if (hold && !limb?.grabbed && this.state === 'playing') {
+      if (hold) {
         label.setPosition(hold.x, hold.y - 30).setVisible(true);
       } else {
         label.setVisible(false);
@@ -701,40 +729,45 @@ export default class GameScene extends Phaser.Scene {
     const pulse = 0.55 + 0.45 * Math.sin(Date.now() / 180);
 
     Object.entries(this.limbTargets || {}).forEach(([key, hold]) => {
-      if (!hold || limbs[key]?.grabbed) return;
-      const col  = RING_COLORS[key];
-      const limb = limbs[key];
+      if (!hold) return;
+      const col     = RING_COLORS[key];
+      const isGrabbed = limbs[key]?.grabbed;
+      const limb    = limbs[key];
 
-      // Pulsing colored ring on target hold
-      g.lineStyle(3, col, 0.55 + pulse * 0.45);
-      g.strokeEllipse(hold.x, hold.y, 60, 42);
-      g.lineStyle(1.5, col, 0.2 + pulse * 0.2);
-      g.strokeEllipse(hold.x, hold.y, 74, 54);
-
-      // Dashed line from current free limb position to target
-      const steps = 7;
-      g.lineStyle(1.5, col, 0.45);
-      for (let i = 0; i < steps; i += 2) {
-        const t0 = i / steps, t1 = Math.min(1, (i + 1.2) / steps);
-        g.beginPath();
-        g.moveTo(limb.x + (hold.x - limb.x) * t0, limb.y + (hold.y - limb.y) * t0);
-        g.lineTo(limb.x + (hold.x - limb.x) * t1, limb.y + (hold.y - limb.y) * t1);
-        g.strokePath();
+      // Grabbed limb target = dashed ring (shows WHERE it will MOVE)
+      // Free limb target = solid ring (shows WHERE it will GRAB)
+      if (isGrabbed) {
+        g.lineStyle(2, col, 0.35 + pulse * 0.25);
+        g.strokeEllipse(hold.x, hold.y, 58, 40);
+        // Short arrow from current hold toward target
+        const curHold = this.allHolds.find(h => h.id === limb.holdId);
+        if (curHold) {
+          const steps = 6;
+          g.lineStyle(1.5, col, 0.3);
+          for (let i = 1; i < steps; i += 2) {
+            const t0 = i / steps, t1 = (i + 0.8) / steps;
+            g.beginPath();
+            g.moveTo(curHold.x + (hold.x - curHold.x) * t0, curHold.y + (hold.y - curHold.y) * t0);
+            g.lineTo(curHold.x + (hold.x - curHold.x) * t1, curHold.y + (hold.y - curHold.y) * t1);
+            g.strokePath();
+          }
+        }
+      } else {
+        // Free limb — bright solid ring + dashed line from dangling position
+        g.lineStyle(3, col, 0.6 + pulse * 0.4);
+        g.strokeEllipse(hold.x, hold.y, 60, 42);
+        g.lineStyle(1.5, col, 0.2 + pulse * 0.2);
+        g.strokeEllipse(hold.x, hold.y, 74, 54);
+        const steps = 7;
+        g.lineStyle(1.5, col, 0.4);
+        for (let i = 0; i < steps; i += 2) {
+          const t0 = i / steps, t1 = Math.min(1, (i + 1.1) / steps);
+          g.beginPath();
+          g.moveTo(limb.x + (hold.x - limb.x) * t0, limb.y + (hold.y - limb.y) * t0);
+          g.lineTo(limb.x + (hold.x - limb.x) * t1, limb.y + (hold.y - limb.y) * t1);
+          g.strokePath();
+        }
       }
-    });
-
-    // Dim rings on other reachable holds (not the primary target)
-    const REACH = { handL:340, handR:340, footL:220, footR:220 };
-    Object.entries(limbs).filter(([, l]) => !l.grabbed).forEach(([key]) => {
-      const anchor  = this.getLimbAnchor(key);
-      const primary = this.limbTargets[key];
-      this.allHolds.filter(h => {
-        if (occupied.includes(h.id)) return false;
-        if (primary && h.id === primary.id) return false; // already shown above
-        return Phaser.Math.Distance.Between(anchor.x, anchor.y, h.x, h.y) <= REACH[key];
-      }).forEach(h => {
-        g.lineStyle(1.5, 0xFFFFFF, 0.18); g.strokeEllipse(h.x, h.y, 52, 34);
-      });
     });
   }
 
