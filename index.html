@@ -3,22 +3,299 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>The Boulder King</title>
+  <title>The Boulder King — Can you reach the top?</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --orange: #FF6B35;
+      --bg:     #0D0D1A;
+      --surface:#111827;
+      --border: #1F2937;
+      --text:   #F9FAFB;
+      --muted:  #6B7280;
+    }
+
+    html { scroll-behavior: smooth; }
+
     body {
-      background: #1a1a2e;
+      font-family: 'Arial', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* ── Header ──────────────────────────────────────── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 32px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(0,0,0,0.4);
+      backdrop-filter: blur(8px);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .logo {
+      font-size: 20px;
+      font-weight: 900;
+      color: var(--orange);
+      letter-spacing: -0.5px;
+    }
+    .logo span { color: var(--text); }
+    nav a {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 14px;
+      margin-left: 24px;
+      transition: color .2s;
+    }
+    nav a:hover { color: var(--text); }
+
+    /* ── Hero ────────────────────────────────────────── */
+    .hero {
+      text-align: center;
+      padding: 48px 16px 32px;
+    }
+    .hero h1 {
+      font-size: clamp(32px, 5vw, 56px);
+      font-weight: 900;
+      line-height: 1.1;
+    }
+    .hero h1 em {
+      color: var(--orange);
+      font-style: normal;
+    }
+    .hero p {
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 16px;
+      max-width: 480px;
+      margin-inline: auto;
+    }
+
+    /* ── Game frame ─────────────────────────────────── */
+    .game-section {
       display: flex;
       justify-content: center;
-      align-items: center;
-      height: 100vh;
-      overflow: hidden;
+      padding: 0 16px 40px;
     }
-    canvas { display: block; }
+
+    .game-cabinet {
+      width: min(1160px, 96vw);
+      background: var(--surface);
+      border: 2px solid var(--border);
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow:
+        0 0 0 1px rgba(255,107,53,0.15),
+        0 24px 80px rgba(0,0,0,0.6),
+        0 0 60px rgba(255,107,53,0.06);
+    }
+
+    /* Top chrome bar */
+    .cabinet-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 18px;
+      background: #0A0A14;
+      border-bottom: 1px solid var(--border);
+    }
+    .cabinet-dots { display: flex; gap: 7px; }
+    .cabinet-dots span {
+      width: 12px; height: 12px;
+      border-radius: 50%;
+    }
+    .cabinet-dots span:nth-child(1) { background: #EF4444; }
+    .cabinet-dots span:nth-child(2) { background: #F59E0B; }
+    .cabinet-dots span:nth-child(3) { background: #22C55E; }
+    .cabinet-label {
+      font-size: 13px;
+      font-weight: 900;
+      color: var(--muted);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+    .cabinet-badge {
+      font-size: 11px;
+      color: var(--orange);
+      font-weight: 700;
+      border: 1px solid rgba(255,107,53,0.4);
+      padding: 3px 10px;
+      border-radius: 20px;
+    }
+
+    /* iframe wrapper — fixed 16:9 */
+    .game-screen {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background: #1a1a2e;
+    }
+    .game-screen iframe {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      border: none;
+      display: block;
+    }
+
+    /* Bottom chrome bar */
+    .cabinet-bottom {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 28px;
+      padding: 10px 18px;
+      background: #0A0A14;
+      border-top: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+    .key-hint {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .key {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 26px; height: 24px;
+      background: var(--border);
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 900;
+      color: var(--text);
+      border: 1px solid #374151;
+      box-shadow: 0 2px 0 #111;
+    }
+    .key.hand { color: #60A5FA; }
+    .key.foot { color: #FB923C; }
+
+    /* ── Info strip ─────────────────────────────────── */
+    .info-strip {
+      display: flex;
+      justify-content: center;
+      gap: 48px;
+      padding: 32px 16px;
+      border-top: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+    .info-item {
+      text-align: center;
+    }
+    .info-item .number {
+      font-size: 32px;
+      font-weight: 900;
+      color: var(--orange);
+    }
+    .info-item .label {
+      font-size: 13px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    /* ── Footer ─────────────────────────────────────── */
+    footer {
+      text-align: center;
+      padding: 24px 16px;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 12px;
+    }
+    footer a { color: var(--orange); text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
-  <script src="https://cdn.jsdelivr.net/npm/phaser@3.88.2/dist/phaser.min.js"></script>
-  <script type="module" src="src/main.js"></script>
+
+  <header>
+    <div class="logo">👑 <em>The</em> Boulder King</div>
+    <nav>
+      <a href="#game">Play</a>
+      <a href="https://github.com/adseeker/the-boulder-king" target="_blank">GitHub</a>
+    </nav>
+  </header>
+
+  <section class="hero">
+    <h1>Can you reach the <em>top</em>?</h1>
+    <p>A bouldering puzzle arcade game. V0 to V10. Figure out the sequence before your forearms give up.</p>
+  </section>
+
+  <section class="game-section" id="game">
+    <div class="game-cabinet">
+
+      <div class="cabinet-top">
+        <div class="cabinet-dots">
+          <span></span><span></span><span></span>
+        </div>
+        <div class="cabinet-label">The Boulder King</div>
+        <div class="cabinet-badge">V0 → V10</div>
+      </div>
+
+      <div class="game-screen">
+        <iframe
+          src="game.html"
+          title="The Boulder King"
+          allowfullscreen
+          allow="autoplay; fullscreen"
+        ></iframe>
+      </div>
+
+      <div class="cabinet-bottom">
+        <div class="key-hint">
+          <span class="key hand">Q</span> Left Hand
+        </div>
+        <div class="key-hint">
+          <span class="key hand">E</span> Right Hand
+        </div>
+        <div class="key-hint">
+          <span class="key foot">Z</span> Left Foot
+        </div>
+        <div class="key-hint">
+          <span class="key foot">X</span> Right Foot
+        </div>
+        <div class="key-hint">
+          <span class="key" style="color:#6B7280">H</span> Hint <span style="color:#4B5563; font-size:11px">(costs pump)</span>
+        </div>
+        <div class="key-hint">
+          <span class="key" style="color:#6B7280">ESC</span> Menu
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section class="info-strip">
+    <div class="info-item">
+      <div class="number">6</div>
+      <div class="label">Grades  V0 → V10</div>
+    </div>
+    <div class="info-item">
+      <div class="number">∞</div>
+      <div class="label">Random layouts per session</div>
+    </div>
+    <div class="info-item">
+      <div class="number">5</div>
+      <div class="label">Unlockable outfits</div>
+    </div>
+    <div class="info-item">
+      <div class="number">⭐⭐⭐</div>
+      <div class="label">Stars per level</div>
+    </div>
+  </section>
+
+  <footer>
+    Built with Phaser.js &nbsp;·&nbsp;
+    <a href="https://github.com/adseeker/the-boulder-king" target="_blank">Open Source on GitHub</a>
+    &nbsp;·&nbsp; 2025
+  </footer>
+
 </body>
 </html>

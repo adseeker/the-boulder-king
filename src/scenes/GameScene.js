@@ -514,11 +514,54 @@ export default class GameScene extends Phaser.Scene {
   // ── Input ───────────────────────────────────────────────────────────────────
 
   setupInput() {
-    this.input.keyboard.on('keydown-Q', () => this.moveLimb('handL'));
-    this.input.keyboard.on('keydown-E', () => this.moveLimb('handR'));
-    this.input.keyboard.on('keydown-Z', () => this.moveLimb('footL'));
-    this.input.keyboard.on('keydown-X', () => this.moveLimb('footR'));
-    this.input.keyboard.on('keydown-H', () => this.triggerHint());
+    this.input.keyboard.on('keydown-Q',      () => this.moveLimb('handL'));
+    this.input.keyboard.on('keydown-E',      () => this.moveLimb('handR'));
+    this.input.keyboard.on('keydown-Z',      () => this.moveLimb('footL'));
+    this.input.keyboard.on('keydown-X',      () => this.moveLimb('footR'));
+    this.input.keyboard.on('keydown-H',      () => this.triggerHint());
+    this.input.keyboard.on('keydown-ESC',    () => this.showMenuConfirm());
+  }
+
+  showMenuConfirm() {
+    if (this.state !== 'playing') return;
+    this.state = 'paused';
+    const W = this.W, H = this.H;
+
+    const el = [
+      this.add.rectangle(W/2, H/2, W, H, 0x000000, 0.76).setOrigin(0.5),
+      this.add.text(W/2, H*0.38, 'ABANDON ATTEMPT?', {
+        fontSize: '32px', fontFamily: 'Arial Black', color: '#FFFFFF',
+        stroke: '#000', strokeThickness: 5,
+      }).setOrigin(0.5),
+      this.add.text(W/2, H*0.50, 'Progress and time will be lost', {
+        fontSize: '14px', fontFamily: 'Arial', color: '#6B7280',
+      }).setOrigin(0.5),
+    ];
+
+    const resume = () => { el.forEach(e => e.destroy()); this.state = 'playing'; };
+
+    const cont = this.add.text(W/2 + 90, H*0.63, '[ CONTINUE ]', {
+      fontSize: '18px', fontFamily: 'Arial Black', color: '#22C55E',
+      backgroundColor: '#111827', padding: { x:14, y:8 },
+    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+    cont.on('pointerover', () => cont.setColor('#FFFFFF'));
+    cont.on('pointerout',  () => cont.setColor('#22C55E'));
+    cont.on('pointerdown', resume);
+    el.push(cont);
+
+    const quit = this.add.text(W/2 - 90, H*0.63, '[ QUIT ]', {
+      fontSize: '18px', fontFamily: 'Arial Black', color: '#EF4444',
+      backgroundColor: '#111827', padding: { x:14, y:8 },
+    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+    quit.on('pointerover', () => quit.setColor('#FFFFFF'));
+    quit.on('pointerout',  () => quit.setColor('#EF4444'));
+    quit.on('pointerdown', () => this.scene.start('MainMenuScene'));
+    el.push(quit);
+
+    this.add.text(W/2, H*0.74, 'or press  ESC  to resume', {
+      fontSize: '12px', fontFamily: 'Arial', color: '#374151',
+    }).setOrigin(0.5);
+    this.input.keyboard.once('keydown-ESC', resume);
   }
 
   triggerHint() {
@@ -955,7 +998,15 @@ export default class GameScene extends Phaser.Scene {
     const lv = this.levelConfig;
     this.add.rectangle(W/2, 0, W, 44, 0x000000, 0.55).setOrigin(0.5,0);
     this.add.text(W/2, 22, 'THE BOULDER KING', { fontSize:'20px', fontFamily:'Arial Black', color:'#FF6B35' }).setOrigin(0.5);
-    this.timerText = this.add.text(20, 22, '⏱ 0:00', { fontSize:'16px', fontFamily:'Arial', color:'#ffffff' }).setOrigin(0,0.5);
+    // ≡ menu button — top left
+    const menuBtn = this.add.text(16, 22, '≡', {
+      fontSize: '22px', fontFamily: 'Arial Black', color: '#6B7280',
+    }).setOrigin(0, 0.5).setInteractive({ useHandCursor: true });
+    menuBtn.on('pointerover', () => menuBtn.setColor('#FFFFFF'));
+    menuBtn.on('pointerout',  () => menuBtn.setColor('#6B7280'));
+    menuBtn.on('pointerdown', () => this.showMenuConfirm());
+
+    this.timerText = this.add.text(46, 22, '⏱ 0:00', { fontSize:'15px', fontFamily:'Arial', color:'#9CA3AF' }).setOrigin(0,0.5);
     this.add.text(W-20, 22, lv.grade, { fontSize:'22px', fontFamily:'Arial Black', color:hex(lv.color) }).setOrigin(1,0.5);
 
     this.add.rectangle(0, H, W, 44, 0x000000, 0.55).setOrigin(0,1);
