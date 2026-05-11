@@ -57,10 +57,9 @@ export default class GameScene extends Phaser.Scene {
     this.cs = Math.min(W, H) / 720;
 
     // Initialise before ANY Phaser callback can fire (update runs same frame as create)
-    this.limbProgress      = { handL: 0, handR: 0, footL: 0, footR: 0 };
     this.limbTargets       = {};
     this.limbTargetInReach = {};
-    this.showingHint       = false;
+    this.allReachable      = {}; // all holds each limb can reach (for visual rings)
 
     this.state            = 'playing';
     this.pump             = 0;
@@ -111,8 +110,37 @@ export default class GameScene extends Phaser.Scene {
       this.climber.torso.x = Phaser.Math.Linear(this.climber.torso.x, this.climber.torsoTarget.x, 0.11);
       this.climber.torso.y = Phaser.Math.Linear(this.climber.torso.y, this.climber.torsoTarget.y, 0.11);
     }
-    // No free-state dangling in beta mode — limbs always on holds.
-    // (Free state only happens on fall, handled in updateFalling)
+
+    // ── Animate limbs ──────────────────────────────────────────────────────────
+    const REACH_DUR  = 320;  // ms for a reach animation
+    const RETURN_DUR = 180;
+    Object.entries(this.climber.limbs).forEach(([key, limb]) => {
+      if (limb.phase === 'reaching') {
+        limb.t = Math.min(1, limb.t + delta / REACH_DUR);
+        const ease = 1 - Math.pow(1 - limb.t, 2); // ease-out quad
+        limb.x = limb.startX + (limb.targetX - limb.startX) * ease;
+        limb.y = limb.startY + (limb.targetY - limb.startY) * ease;
+        if (limb.t >= 1) {
+          // Arrived — grab hold and recover a bit
+          limb.grabbed = true;
+          limb.holdId  = limb.targetHoldId;
+          limb.phase   = 'idle';
+          limb.t       = 0;
+          this.pump    = Math.max(0, this.pump - this.levelConfig.pumpRate * 0.18);
+          this.moves++;
+          playGrab(this.sound.context);
+          this.chalkPuff(limb.x, limb.y);
+          this.showGrabText(limb.x, limb.y, key.startsWith('hand'));
+          this.updateTorsoTarget();
+          this.recalcTargets();
+        }
+      } else if (limb.phase === 'floating') {
+        // Dangle toward natural hang position
+        const fp = this.getFreePos(key);
+        limb.x = Phaser.Math.Linear(limb.x, fp.x, 0.12);
+        limb.y = Phaser.Math.Linear(limb.y, fp.y, 0.12);
+      }
+    });
 
     const pumpRate = this.computePumpRate();
     this.pump  = Math.min(100, Math.max(0, this.pump + pumpRate * dt));
@@ -169,20 +197,18 @@ export default class GameScene extends Phaser.Scene {
   // ── Win / Fall triggers ─────────────────────────────────────────────────────
 
   checkWin() {
-    if (!this.levelConfig?.beta || !this.limbProgress) return false;
-    const beta = this.levelConfig.beta;
-    return ['handL', 'handR'].some(key => {
-      const route = beta[key];
-      return this.limbProgress[key] >= route.length - 1 &&
-             this.climber.limbs[key].grabbed &&
-             this.climber.limbs[key].holdId === route[route.length - 1];
-    });
+    // Win = any hand grabs the TOP hold (last in holds array)
+    const topId = this.holds[this.holds.length - 1]?.id;
+    if (!topId) return false;
+    return ['handL','handR'].some(k =>
+      this.climber.limbs[k].grabbed && this.climber.limbs[k].holdId === topId
+    );
   }
 
   startFall() {
     this.state     = 'falling';
     this.fallTimer = 0; this.fallVel = 0; this.fallPhase = 0; this.hasLanded = false;
-    Object.values(this.climber.limbs).forEach(l => { l.grabbed = false; l.holdId = null; });
+    Object.values(this.climber.limbs).forEach(l => { l.grabbed = false; l.holdId = null; l.phase = 'floating'; });
     this.climber.torsoTarget = null;
     playFall(this.sound.context);
     this.showFallScream();
@@ -564,60 +590,68 @@ export default class GameScene extends Phaser.Scene {
     this.input.keyboard.once('keydown-ESC', resume);
   }
 
-  triggerHint() {
-    if (this.state !== 'playing') return;
-    if (this.showingHint) return;
-    // Hint costs pump — trade time for information
-    this.pump = Math.min(100, this.pump + 12);
-    this.showingHint = true;
-    this.showNotif('HINT! (+12 pump)', '#6B7280');
-    this.time.delayedCall(2200, () => { this.showingHint = false; });
-  }
+  triggerHint() { /* removed — animation is the hint */ }
 
   moveLimb(key) {
     if (this.state !== 'playing') return;
     const limb   = this.climber.limbs[key];
     const isHand = key.startsWith('hand');
     const ctx    = this.sound.context;
-    const target     = this.limbTargets[key];
-    if (!target) return; // no more moves in beta — no cost
+    // Can't start a new move while already reaching
+    if (limb.phase === 'reaching') return;
 
-    const attemptCost = this.levelConfig.pumpRate * 0.30; // effort of trying
-
-    if (!this.limbTargetInReach[key]) {
-      // Failed attempt: pump goes up, no relief, reposition feedback
-      this.pump = Math.min(100, this.pump + attemptCost);
-      this.cameras.main.shake(120, 0.004);
-      const bang = this.add.text(target.x, target.y - 28, 'REPOSITION FIRST', {
-        fontSize: '12px', fontFamily: 'Arial Black', color: '#FB923C',
-        stroke: '#000', strokeThickness: 3,
-      }).setOrigin(0.5);
-      this.tweens.add({ targets: bang, y: bang.y - 22, alpha: 0, duration: 700, onComplete: () => bang.destroy() });
+    const target = this.getBestTarget(key);
+    if (!target) {
+      // Nothing reachable — short shake
+      this.cameras.main.shake(90, 0.004);
       return;
     }
 
-    // Successful grab: pump up (effort) then immediately down (relief on new hold)
-    const relief = this.levelConfig.pumpRate * 0.18;
-    this.pump = Math.min(100, this.pump + attemptCost); // up first
-    limb.holdId = target.id; limb.x = target.x; limb.y = target.y;
-    limb.grabbed = true;
-    this.limbProgress[key]++;
-    this.moves++;
-    this.pump = Math.max(0, this.pump - relief); // then partial relief
-    playGrab(ctx);
+    // Release current hold and begin animated reach
+    limb.grabbed       = false;
+    limb.holdId        = null;
+    limb.phase         = 'reaching';
+    limb.t             = 0;
+    limb.startX        = limb.x;
+    limb.startY        = limb.y;
+    limb.targetX       = target.x;
+    limb.targetY       = target.y;
+    limb.targetHoldId  = target.id;
+    // Pump cost for the attempt (effort of releasing and reaching)
+    this.pump = Math.min(100, this.pump + this.levelConfig.pumpRate * 0.25);
+    playRelease(ctx);
+    this.updateTorsoTarget();
+    this.recalcTargets();
     this.chalkPuff(target.x, target.y);
     this.showGrabText(target.x, target.y, isHand);
     this.updateTorsoTarget();
     this.recalcTargets();
   }
 
-  // Returns the next hold in this limb's beta route, or null if route complete
-  getNextBetaHold(key) {
-    const beta     = this.levelConfig.beta[key];
-    const progress = this.limbProgress[key];
-    const nextIdx  = progress + 1;
-    if (!beta || nextIdx >= beta.length) return null;
-    return this.allHolds.find(h => h.id === beta[nextIdx]) || null;
+  // Best reachable hold for this limb — closest unoccupied hold above current position
+  getBestTarget(key) {
+    const limb    = this.climber.limbs[key];
+    const isHand  = key.startsWith('hand');
+    const reach   = isHand ? this.levelConfig.armReach * this.H : this.levelConfig.footReach * this.H;
+    const anchor  = this.getLimbAnchor(key);
+    const occupied = Object.entries(this.climber.limbs)
+      .filter(([k, l]) => k !== key && (l.grabbed || l.phase === 'reaching'))
+      .map(([, l]) => l.holdId ?? l.targetHoldId);
+
+    const currentY = limb.y;
+    const candidates = this.allHolds
+      .filter(h => !occupied.includes(h.id) && h.id !== limb.holdId)
+      .filter(h => Phaser.Math.Distance.Between(anchor.x, anchor.y, h.x, h.y) <= reach);
+
+    if (!candidates.length) return null;
+
+    // Prefer holds above current position, then closest
+    const above = candidates.filter(h => h.y < currentY - 15);
+    const pool  = above.length ? above : candidates;
+    return pool.sort((a, b) =>
+      Phaser.Math.Distance.Between(anchor.x, anchor.y, a.x, a.y) -
+      Phaser.Math.Distance.Between(anchor.x, anchor.y, b.x, b.y)
+    )[0];
   }
 
   updateTorsoTarget() {
@@ -660,15 +694,17 @@ export default class GameScene extends Phaser.Scene {
   computePumpRate() {
     const L  = this.climber.limbs;
     const pr = this.levelConfig.pumpRate;
-    const handsGrabbed = ['handL','handR'].filter(k => L[k].grabbed).length;
-    const feetGrabbed  = ['footL','footR'].filter(k => L[k].grabbed).length;
+    const handsGrabbed  = ['handL','handR'].filter(k => L[k].grabbed).length;
+    const feetGrabbed   = ['footL','footR'].filter(k => L[k].grabbed).length;
+    const handsReaching = ['handL','handR'].filter(k => L[k].phase === 'reaching').length;
 
-    if (handsGrabbed === 0) return pr * 2.0;  // no hands — very fast
+    if (handsGrabbed + handsReaching === 0) return pr * 2.0; // no hands = danger
 
-    // comfortable (2 feet): pr*0.20  /s
-    // 1 foot off:           pr*0.40  /s
-    // no feet:              pr*0.60  /s
-    return pr * (0.20 + (2 - feetGrabbed) * 0.20);
+    // base rate by foot position
+    const base = pr * (0.20 + (2 - feetGrabbed) * 0.20);
+    // extra strain while arm is extended mid-reach
+    const reachStrain = handsReaching * pr * 0.55;
+    return base + reachStrain;
   }
 
   // Shoulder/hip anchor — proportional so it works at any screen size
@@ -685,26 +721,14 @@ export default class GameScene extends Phaser.Scene {
     }[key];
   }
 
-  // Recalculate beta targets and reach flags for all limbs
+  // Recalculate best targets for idle/floating limbs (used only for updateTargetLabels)
   recalcTargets() {
     if (this.state !== 'playing') return;
-    this.limbTargets      = {};
-    this.limbTargetInReach = {};
-
-    // Reach proportional to screen height, capped at grade's arm/foot reach
-    const ar = this.levelConfig.armReach  * this.H;
-    const fr = this.levelConfig.footReach * this.H;
-    const REACH = { handL: ar, handR: ar, footL: fr, footR: fr };
-
+    this.limbTargets = {};
     Object.keys(this.climber.limbs).forEach(key => {
-      const hold = this.getNextBetaHold(key);
-      this.limbTargets[key] = hold;
-      if (hold) {
-        const anchor = this.getLimbAnchor(key);
-        const dist   = Phaser.Math.Distance.Between(anchor.x, anchor.y, hold.x, hold.y);
-        this.limbTargetInReach[key] = dist <= REACH[key];
-      } else {
-        this.limbTargetInReach[key] = false;
+      const limb = this.climber.limbs[key];
+      if (limb.phase === 'idle' || limb.phase === 'floating') {
+        this.limbTargets[key] = this.getBestTarget(key);
       }
     });
   }
@@ -728,23 +752,8 @@ export default class GameScene extends Phaser.Scene {
   }
 
   updateTargetLabels() {
-    // Labels are hidden by default — player discovers the sequence themselves.
-    // Shown only briefly when player presses H (hint, costs pump).
-    if (!this.showingHint) {
-      Object.values(this.targetLabels).forEach(l => l.setVisible(false));
-      return;
-    }
-    Object.entries(this.targetLabels).forEach(([key, label]) => {
-      const hold = this.limbTargets[key];
-      if (hold) {
-        const inReach = this.limbTargetInReach[key];
-        label.setPosition(hold.x, hold.y - 30)
-             .setVisible(true)
-             .setAlpha(inReach ? 1.0 : 0.45);
-      } else {
-        label.setVisible(false);
-      }
-    });
+    // No labels — physical animation is the feedback
+    Object.values(this.targetLabels || {}).forEach(l => l.setVisible(false));
   }
 
   // First-play tutorial hints (V0 only, shown once)
@@ -839,37 +848,7 @@ export default class GameScene extends Phaser.Scene {
       g.lineStyle(2, 0xFFFFFF, 0.3); g.strokeEllipse(hold.x, hold.y, 66, 46);
     });
 
-    if (this.state !== 'playing') return;
-
-    // Only draw target rings when hint is active
-    if (!this.showingHint) return;
-
-    const RING_COLORS = { handL:0x60A5FA, handR:0x60A5FA, footL:0xFB923C, footR:0xFB923C };
-    const pulse = 0.55 + 0.45 * Math.sin(Date.now() / 180);
-
-    Object.entries(this.limbTargets || {}).forEach(([key, hold]) => {
-      if (!hold) return;
-      const col     = RING_COLORS[key];
-      const inReach = this.limbTargetInReach[key];
-      const limb    = limbs[key];
-
-      if (inReach) {
-        g.lineStyle(3, col, 0.60 + pulse * 0.40);
-        g.strokeEllipse(hold.x, hold.y, 60, 42);
-        const steps = 7;
-        g.lineStyle(1.5, col, 0.40);
-        for (let i = 0; i < steps; i += 2) {
-          const t0 = i / steps, t1 = Math.min(1, (i + 1.1) / steps);
-          g.beginPath();
-          g.moveTo(limb.x + (hold.x - limb.x) * t0, limb.y + (hold.y - limb.y) * t0);
-          g.lineTo(limb.x + (hold.x - limb.x) * t1, limb.y + (hold.y - limb.y) * t1);
-          g.strokePath();
-        }
-      } else {
-        g.lineStyle(2, 0xFB923C, 0.28 + pulse * 0.18);
-        g.strokeEllipse(hold.x, hold.y, 58, 40);
-      }
-    });
+    // No overlay rings — the animated limb itself IS the visual feedback
   }
 
   // ── Climber ─────────────────────────────────────────────────────────────────
@@ -877,14 +856,21 @@ export default class GameScene extends Phaser.Scene {
   createClimber(W, H) {
     const sl = this.holds[0]; const sr = this.holds[1];
     const fl = this.footHolds[0]; const fr = this.footHolds[1];
+    const mkLimb = (h) => ({
+      x: h.x, y: h.y, grabbed: true, holdId: h.id,
+      // animation state
+      phase: 'idle',       // idle | reaching | returning | floating
+      startX: h.x, startY: h.y,
+      targetX: h.x, targetY: h.y,
+      targetHoldId: null,
+      t: 0,                // 0→1 animation progress
+    });
     this.climber = {
       torso: { x:(sl.x+sr.x)/2, y:(sl.y+fl.y)/2-10 },
       torsoTarget: null,
       limbs: {
-        handL:{ x:sl.x, y:sl.y, grabbed:true, holdId:sl.id },
-        handR:{ x:sr.x, y:sr.y, grabbed:true, holdId:sr.id },
-        footL:{ x:fl.x, y:fl.y, grabbed:true, holdId:fl.id },
-        footR:{ x:fr.x, y:fr.y, grabbed:true, holdId:fr.id },
+        handL: mkLimb(sl), handR: mkLimb(sr),
+        footL: mkLimb(fl), footR: mkLimb(fr),
       },
     };
   }
@@ -1012,9 +998,6 @@ export default class GameScene extends Phaser.Scene {
     .forEach((c,i) => this.add.text(W/2-200+i*122, H-22, `[${c.key}] ${c.label}`, {
       fontSize:'13px', fontFamily:'Arial Black', color:c.col,
     }).setOrigin(0,0.5));
-    this.add.text(W/2+295, H-22, '[H] Hint  (-12 pump)', {
-      fontSize:'11px', fontFamily:'Arial', color:'#4B5563',
-    }).setOrigin(0, 0.5);
 
     this.add.text(W-120, H-30, 'PUMP', { fontSize:'10px', fontFamily:'Arial Black', color:'#FF6B35' }).setOrigin(0,0.5);
     this.add.rectangle(W-120, H-16, 104, 10, 0x333333).setOrigin(0,0.5);
