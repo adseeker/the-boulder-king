@@ -37,11 +37,12 @@ const HOLD_COLORS_R = [0xEF4444, 0xA855F7, 0xF97316];
 // ── Grade parameters ────────────────────────────────────────────────────────────
 
 // ARM_LENGTH and FOOT_LENGTH in px at cs=1 (720p baseline) — must match GameScene constants
-const ARM_PX  = 120;
-const FOOT_PX = 100;
-// Generator uses a small margin above physical length to ensure solvability
-const ARM_REACH  = ARM_PX  * 1.05 / 720;  // ~0.175H
-const FOOT_REACH = FOOT_PX * 1.05 / 720;  // ~0.146H
+const ARM_PX  = 145;
+const FOOT_PX = 115;
+// Generator uses a 22% margin above physical length so the route stays solvable
+// even when the player's torso deviates from the simulated position.
+const ARM_REACH  = ARM_PX  * 1.22 / 720;  // ~0.246H
+const FOOT_REACH = FOOT_PX * 1.22 / 720;  // ~0.195H
 
 export const GRADE_PARAMS = {
   V0: {
@@ -216,6 +217,47 @@ function placeTop(state, params, rng, aspect, holds, footHolds) {
   return { id, xr: topX, yr: topY, color: 0xF59E0B, label: 'TOP' };
 }
 
+// ── Reserve holds ──────────────────────────────────────────────────────────────
+// Scatter a few extra holds in the gaps between beta holds.
+// These are NOT part of the solution path, but give the player backtracking options
+// and alternative routes when they take a wrong turn.
+
+function addReserveHolds(holds, footHolds, rng, aspect) {
+  const EXTRA_COLORS = [0xA855F7, 0xEF4444, 0x3B82F6, 0xF97316, 0x22C55E];
+  // Route holds (exclude START labels and placeholder top — added after this call)
+  const route = holds.filter(h => !h.label);
+  if (route.length < 2) return;
+
+  const sorted = [...route].sort((a, b) => b.yr - a.yr); // bottom → top
+
+  let added = 0;
+  const maxExtra = Math.min(4, Math.floor(sorted.length / 2));
+
+  for (let attempt = 0; attempt < 30 && added < maxExtra; attempt++) {
+    const idx = Math.floor(rng() * (sorted.length - 1));
+    const h1  = sorted[idx];
+    const h2  = sorted[idx + 1];
+
+    // Place a hold roughly between h1 and h2 with slight random offset
+    const candidate = {
+      xr: (h1.xr + h2.xr) / 2 + (rng() - 0.5) * 0.10,
+      yr: (h1.yr + h2.yr) / 2 + (rng() - 0.5) * 0.06,
+    };
+
+    if (candidate.xr < 0.09 || candidate.xr > 0.91) continue;
+    if (candidate.yr < 0.08 || candidate.yr > 0.78) continue;
+    if (!clearOfAllHolds(candidate, holds, footHolds, aspect)) continue;
+
+    holds.push({
+      id:    `hr${added}`,
+      xr:    candidate.xr,
+      yr:    candidate.yr,
+      color: EXTRA_COLORS[added % EXTRA_COLORS.length],
+    });
+    added++;
+  }
+}
+
 // ── Main generator ─────────────────────────────────────────────────────────────
 
 export function generateLevel(grade, aspect, seed) {
@@ -271,6 +313,9 @@ export function generateLevel(grade, aspect, seed) {
 
     state[move] = pos;
   }
+
+  // ── Extra "reserve" holds (not in beta, but reachable shortcuts / backtrack options)
+  addReserveHolds(holds, footHolds, rng, aspect);
 
   // ── TOP ───────────────────────────────────────────────────────────────────────
   const top = placeTop(state, p, rng, aspect, holds, footHolds);

@@ -10,8 +10,8 @@ const LEVELS = GRADE_PARAMS;
 // ── Fixed limb lengths (px at cs=1 / 720p baseline) ──────────────────────────
 // These are PHYSICAL constants — arms/legs never stretch beyond these.
 // Reach radius in gameplay = same value (physics matches visuals exactly).
-const ARM_LENGTH  = 120;
-const FOOT_LENGTH = 100;
+const ARM_LENGTH  = 145;
+const FOOT_LENGTH = 115;
 
 const hex = n => '#' + n.toString(16).padStart(6, '0');
 
@@ -608,8 +608,20 @@ export default class GameScene extends Phaser.Scene {
 
     const target = this.getBestTarget(key);
     if (!target) {
-      // Nothing reachable — short shake
-      this.cameras.main.shake(90, 0.004);
+      // Nothing reachable — nudge the limb visually + tell player to reposition
+      this.cameras.main.shake(100, 0.004);
+      this.pump = Math.min(100, this.pump + this.levelConfig.pumpRate * 0.15);
+
+      // Check if ALL limbs have no target (completely stuck)
+      const allStuck = ['handL','handR','footL','footR'].every(k => !this.getBestTarget(k));
+      const msg = allStuck ? 'MOVE FEET UP FIRST' : 'OUT OF REACH';
+      const tx = limb.x, ty = limb.y;
+      const hint = this.add.text(tx, ty - 24, msg, {
+        fontSize: '13px', fontFamily: 'Arial Black',
+        color: allStuck ? '#EF4444' : '#FB923C',
+        stroke: '#000', strokeThickness: 3,
+      }).setOrigin(0.5);
+      this.tweens.add({ targets: hint, y: ty - 52, alpha: 0, duration: 700, onComplete: () => hint.destroy() });
       return;
     }
 
@@ -652,9 +664,10 @@ export default class GameScene extends Phaser.Scene {
 
     if (!candidates.length) return null;
 
-    // Prefer holds above current position, then closest
-    const above = candidates.filter(h => h.y < currentY - 15);
-    const pool  = above.length ? above : candidates;
+    // Primary: holds above OR at same level (up to 40px below = allows lateral/back moves)
+    // Fallback: any direction — enables full backtracking when player needs to reroute
+    const preferredPool = candidates.filter(h => h.y < currentY + 40);
+    const pool = preferredPool.length ? preferredPool : candidates;
     return pool.sort((a, b) =>
       Phaser.Math.Distance.Between(anchor.x, anchor.y, a.x, a.y) -
       Phaser.Math.Distance.Between(anchor.x, anchor.y, b.x, b.y)
