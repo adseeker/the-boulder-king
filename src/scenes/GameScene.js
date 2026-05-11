@@ -62,10 +62,8 @@ export default class GameScene extends Phaser.Scene {
     // Character scale — everything proportional to screen height
     this.cs = Math.min(W, H) / 720;
 
-    // Initialise before ANY Phaser callback can fire (update runs same frame as create)
-    this.limbTargets       = {};
-    this.limbTargetInReach = {};
-    this.allReachable      = {}; // all holds each limb can reach (for visual rings)
+    // Initialise before ANY Phaser callback can fire
+    this.dragging         = null; // { key, prevHoldId, prevX, prevY }
 
     this.state            = 'playing';
     this.pump             = 0;
@@ -91,11 +89,8 @@ export default class GameScene extends Phaser.Scene {
 
     this.setupInput();
     this.setupHUD(W, H);
-    this.setupTargetLabels();
     this.updateTorsoTarget();
-    this.recalcTargets();
     this.drawHoldOverlays();
-    this.updateTargetLabels();
     this.drawClimber();
     this.startBetaSprayTimer();
     this.showStartHints();
@@ -117,31 +112,9 @@ export default class GameScene extends Phaser.Scene {
       this.climber.torso.y = Phaser.Math.Linear(this.climber.torso.y, this.climber.torsoTarget.y, 0.11);
     }
 
-    // ── Animate limbs ──────────────────────────────────────────────────────────
-    const REACH_DUR  = 320;  // ms for a reach animation
-    const RETURN_DUR = 180;
+    // Floating limbs drift to natural hang position when not dragged
     Object.entries(this.climber.limbs).forEach(([key, limb]) => {
-      if (limb.phase === 'reaching') {
-        limb.t = Math.min(1, limb.t + delta / REACH_DUR);
-        const ease = 1 - Math.pow(1 - limb.t, 2); // ease-out quad
-        limb.x = limb.startX + (limb.targetX - limb.startX) * ease;
-        limb.y = limb.startY + (limb.targetY - limb.startY) * ease;
-        if (limb.t >= 1) {
-          // Arrived — grab hold and recover a bit
-          limb.grabbed = true;
-          limb.holdId  = limb.targetHoldId;
-          limb.phase   = 'idle';
-          limb.t       = 0;
-          this.pump    = Math.max(0, this.pump - this.levelConfig.pumpRate * 0.18);
-          this.moves++;
-          playGrab(this.sound.context);
-          this.chalkPuff(limb.x, limb.y);
-          this.showGrabText(limb.x, limb.y, key.startsWith('hand'));
-          this.updateTorsoTarget();
-          this.recalcTargets();
-        }
-      } else if (limb.phase === 'floating') {
-        // Dangle toward natural hang position
+      if (limb.phase === 'floating') {
         const fp = this.getFreePos(key);
         limb.x = Phaser.Math.Linear(limb.x, fp.x, 0.12);
         limb.y = Phaser.Math.Linear(limb.y, fp.y, 0.12);
@@ -164,9 +137,7 @@ export default class GameScene extends Phaser.Scene {
     if (this.pump >= 100) { this.startFall(); return; }
     if (this.checkWin())  { this.startWin();  return; }
 
-    this.recalcTargets();
     this.drawHoldOverlays();
-    this.updateTargetLabels();
     this.drawClimber();
     this.updateHUD();
   }
@@ -546,12 +517,108 @@ export default class GameScene extends Phaser.Scene {
   // ── Input ───────────────────────────────────────────────────────────────────
 
   setupInput() {
-    this.input.keyboard.on('keydown-Q',      () => this.moveLimb('handL'));
-    this.input.keyboard.on('keydown-E',      () => this.moveLimb('handR'));
-    this.input.keyboard.on('keydown-Z',      () => this.moveLimb('footL'));
-    this.input.keyboard.on('keydown-X',      () => this.moveLimb('footR'));
-    this.input.keyboard.on('keydown-H',      () => this.triggerHint());
-    this.input.keyboard.on('keydown-ESC',    () => this.showMenuConfirm());
+    this.input.keyboard.on('keydown-ESC', () => this.showMenuConfirm());
+    // Drag controls
+    this.input.on('pointerdown', p => this.onDragStart(p));
+    this.input.on('pointermove', p => this.onDragMove(p));
+    this.input.on('pointerup',   p => this.onDragEnd(p));
+  }
+
+  // ── Drag input ──────────────────────────────────────────────────────────────
+
+  onDragStart(pointer) {
+    if (this.state !== 'playing') return;
+    const { x, y } = pointer;
+    const limbs = this.climber.limbs;
+
+    // Find nearest limb within selection radius
+    let nearest = null, nearestDist = Infinity;
+    const SEL = 55 * this.cs;
+    Object.entries(limbs).forEach(([key, limb]) => {
+      const d = Phaser.Math.Distance.Between(x, y, limb.x, limb.y);
+      if (d < nearestDist && d < SEL) { nearest = key; nearestDist = d; }
+    });
+    if (!nearest) return;
+
+    const limb = limbs[nearest];
+    this.dragging = { key: nearest, prevHoldId: limb.holdId, prevX: limb.x, prevY: limb.y };
+
+    // Release from current hold — limb now floats at current position
+    limb.grabbed = false;
+    limb.holdId  = null;
+    limb.phase   = 'dragging';
+    // Small pump cost for initiating a move
+    this.pump = Math.min(100, this.pump + this.levelConfig.pumpRate * 0.20);
+    playRelease(this.sound.context);
+    this.updateTorsoTarget();
+  }
+
+  onDragMove(pointer) {
+    if (!this.dragging) return;
+    const { key } = this.dragging;
+    const limb    = this.climber.limbs[key];
+    if (limb.phase !== 'dragging') return;
+
+    const isHand = key.startsWith('hand');
+    const anchor = this.getLimbAnchor(key);
+    const maxLen = (isHand ? ARM_LENGTH : FOOT_LENGTH) * this.cs;
+
+    // Follow cursor, clamped to arm/leg length from anchor
+    const dx = pointer.x - anchor.x;
+    const dy = pointer.y - anchor.y;
+    const d  = Math.sqrt(dx*dx + dy*dy) || 1;
+    if (d <= maxLen) { limb.x = pointer.x; limb.y = pointer.y; }
+    else             { limb.x = anchor.x + dx/d * maxLen; limb.y = anchor.y + dy/d * maxLen; }
+
+    this.updateTorsoTarget();
+  }
+
+  onDragEnd(pointer) {
+    if (!this.dragging) return;
+    const { key, prevHoldId, prevX, prevY } = this.dragging;
+    this.dragging = null;
+    const limb    = this.climber.limbs[key];
+    const isHand  = key.startsWith('hand');
+    const anchor  = this.getLimbAnchor(key);
+    const maxLen  = (isHand ? ARM_LENGTH : FOOT_LENGTH) * this.cs;
+    const SNAP    = 48 * this.cs;
+
+    const occupied = Object.entries(this.climber.limbs)
+      .filter(([k, l]) => k !== key && l.grabbed)
+      .map(([, l]) => l.holdId);
+
+    // Holds within arm reach of anchor AND within snap distance of current limb position
+    const snappable = this.allHolds
+      .filter(h => !occupied.includes(h.id))
+      .filter(h => Phaser.Math.Distance.Between(anchor.x, anchor.y, h.x, h.y) <= maxLen)
+      .filter(h => Phaser.Math.Distance.Between(limb.x, limb.y, h.x, h.y) <= SNAP)
+      .sort((a, b) =>
+        Phaser.Math.Distance.Between(limb.x, limb.y, a.x, a.y) -
+        Phaser.Math.Distance.Between(limb.x, limb.y, b.x, b.y)
+      );
+
+    if (snappable.length > 0) {
+      const target = snappable[0];
+      limb.x = target.x; limb.y = target.y;
+      limb.grabbed = true; limb.holdId = target.id; limb.phase = 'idle';
+      this.pump = Math.max(0, this.pump - this.levelConfig.pumpRate * 0.15); // relief
+      this.moves++;
+      playGrab(this.sound.context);
+      this.chalkPuff(target.x, target.y);
+    } else {
+      // Return to previous hold (backtracking) or float
+      const prevHold = prevHoldId ? this.allHolds.find(h => h.id === prevHoldId) : null;
+      if (prevHold) {
+        limb.x = prevHold.x; limb.y = prevHold.y;
+        limb.grabbed = true; limb.holdId = prevHoldId; limb.phase = 'idle';
+      } else {
+        limb.phase = 'floating';
+      }
+      // Failed drop — small penalty
+      this.pump = Math.min(100, this.pump + this.levelConfig.pumpRate * 0.12);
+    }
+
+    this.updateTorsoTarget();
   }
 
   showMenuConfirm() {
@@ -596,83 +663,6 @@ export default class GameScene extends Phaser.Scene {
     this.input.keyboard.once('keydown-ESC', resume);
   }
 
-  triggerHint() { /* removed — animation is the hint */ }
-
-  moveLimb(key) {
-    if (this.state !== 'playing') return;
-    const limb   = this.climber.limbs[key];
-    const isHand = key.startsWith('hand');
-    const ctx    = this.sound.context;
-    // Can't start a new move while already reaching
-    if (limb.phase === 'reaching') return;
-
-    const target = this.getBestTarget(key);
-    if (!target) {
-      // Nothing reachable — nudge the limb visually + tell player to reposition
-      this.cameras.main.shake(100, 0.004);
-      this.pump = Math.min(100, this.pump + this.levelConfig.pumpRate * 0.15);
-
-      // Check if ALL limbs have no target (completely stuck)
-      const allStuck = ['handL','handR','footL','footR'].every(k => !this.getBestTarget(k));
-      const msg = allStuck ? 'MOVE FEET UP FIRST' : 'OUT OF REACH';
-      const tx = limb.x, ty = limb.y;
-      const hint = this.add.text(tx, ty - 24, msg, {
-        fontSize: '13px', fontFamily: 'Arial Black',
-        color: allStuck ? '#EF4444' : '#FB923C',
-        stroke: '#000', strokeThickness: 3,
-      }).setOrigin(0.5);
-      this.tweens.add({ targets: hint, y: ty - 52, alpha: 0, duration: 700, onComplete: () => hint.destroy() });
-      return;
-    }
-
-    // Release current hold and begin animated reach
-    limb.grabbed       = false;
-    limb.holdId        = null;
-    limb.phase         = 'reaching';
-    limb.t             = 0;
-    limb.startX        = limb.x;
-    limb.startY        = limb.y;
-    limb.targetX       = target.x;
-    limb.targetY       = target.y;
-    limb.targetHoldId  = target.id;
-    // Pump cost for the attempt (effort of releasing and reaching)
-    this.pump = Math.min(100, this.pump + this.levelConfig.pumpRate * 0.25);
-    playRelease(ctx);
-    this.updateTorsoTarget();
-    this.recalcTargets();
-    this.chalkPuff(target.x, target.y);
-    this.showGrabText(target.x, target.y, isHand);
-    this.updateTorsoTarget();
-    this.recalcTargets();
-  }
-
-  // Best reachable hold for this limb — closest unoccupied hold above current position
-  getBestTarget(key) {
-    const limb    = this.climber.limbs[key];
-    const isHand  = key.startsWith('hand');
-    // Reach = physical limb length × character scale. Matches drawClimber clamping exactly.
-    const reach   = (isHand ? ARM_LENGTH : FOOT_LENGTH) * this.cs;
-    const anchor  = this.getLimbAnchor(key);
-    const occupied = Object.entries(this.climber.limbs)
-      .filter(([k, l]) => k !== key && (l.grabbed || l.phase === 'reaching'))
-      .map(([, l]) => l.holdId ?? l.targetHoldId);
-
-    const currentY = limb.y;
-    const candidates = this.allHolds
-      .filter(h => !occupied.includes(h.id) && h.id !== limb.holdId)
-      .filter(h => Phaser.Math.Distance.Between(anchor.x, anchor.y, h.x, h.y) <= reach);
-
-    if (!candidates.length) return null;
-
-    // Primary: holds above OR at same level (up to 40px below = allows lateral/back moves)
-    // Fallback: any direction — enables full backtracking when player needs to reroute
-    const preferredPool = candidates.filter(h => h.y < currentY + 40);
-    const pool = preferredPool.length ? preferredPool : candidates;
-    return pool.sort((a, b) =>
-      Phaser.Math.Distance.Between(anchor.x, anchor.y, a.x, a.y) -
-      Phaser.Math.Distance.Between(anchor.x, anchor.y, b.x, b.y)
-    )[0];
-  }
 
   updateTorsoTarget() {
     const L     = this.climber.limbs;
@@ -714,17 +704,12 @@ export default class GameScene extends Phaser.Scene {
   computePumpRate() {
     const L  = this.climber.limbs;
     const pr = this.levelConfig.pumpRate;
-    const handsGrabbed  = ['handL','handR'].filter(k => L[k].grabbed).length;
-    const feetGrabbed   = ['footL','footR'].filter(k => L[k].grabbed).length;
-    const handsReaching = ['handL','handR'].filter(k => L[k].phase === 'reaching').length;
+    const handsGrabbed = ['handL','handR'].filter(k => L[k].grabbed).length;
+    const feetGrabbed  = ['footL','footR'].filter(k => L[k].grabbed).length;
 
-    if (handsGrabbed + handsReaching === 0) return pr * 2.0; // no hands = danger
-
-    // base rate by foot position
-    const base = pr * (0.20 + (2 - feetGrabbed) * 0.20);
-    // extra strain while arm is extended mid-reach
-    const reachStrain = handsReaching * pr * 0.55;
-    return base + reachStrain;
+    if (handsGrabbed === 0) return pr * 2.0;
+    // comfortable (both feet): pr*0.20/s | 1 foot off: pr*0.40 | no feet: pr*0.60
+    return pr * (0.20 + (2 - feetGrabbed) * 0.20);
   }
 
   // Shoulder/hip anchor — proportional so it works at any screen size
@@ -741,40 +726,7 @@ export default class GameScene extends Phaser.Scene {
     }[key];
   }
 
-  // Recalculate best targets for idle/floating limbs (used only for updateTargetLabels)
-  recalcTargets() {
-    if (this.state !== 'playing') return;
-    this.limbTargets = {};
-    Object.keys(this.climber.limbs).forEach(key => {
-      const limb = this.climber.limbs[key];
-      if (limb.phase === 'idle' || limb.phase === 'floating') {
-        this.limbTargets[key] = this.getBestTarget(key);
-      }
-    });
-  }
-
-  // Floating key-badge labels that hover above the target hold
-  setupTargetLabels() {
-    const cfgs = [
-      { key:'handL', label:'Q', color:'#60A5FA' },
-      { key:'handR', label:'E', color:'#60A5FA' },
-      { key:'footL', label:'Z', color:'#FB923C' },
-      { key:'footR', label:'X', color:'#FB923C' },
-    ];
-    this.targetLabels = {};
-    cfgs.forEach(({ key, label, color }) => {
-      this.targetLabels[key] = this.add.text(-999, -999, label, {
-        fontSize: '13px', fontFamily: 'Arial Black', color,
-        backgroundColor: 'rgba(0,0,0,0.72)',
-        padding: { x: 6, y: 4 },
-      }).setOrigin(0.5).setDepth(10);
-    });
-  }
-
-  updateTargetLabels() {
-    // No labels — physical animation is the feedback
-    Object.values(this.targetLabels || {}).forEach(l => l.setVisible(false));
-  }
+  recalcTargets() {} // no-op — drag system doesn't need pre-computed targets
 
   // First-play tutorial hints (V0 only, shown once)
   showStartHints() {
@@ -868,7 +820,33 @@ export default class GameScene extends Phaser.Scene {
       g.lineStyle(2, 0xFFFFFF, 0.3); g.strokeEllipse(hold.x, hold.y, 66, 46);
     });
 
-    // No overlay rings — the animated limb itself IS the visual feedback
+    if (!this.dragging) return; // show overlays only while dragging
+
+    const { key } = this.dragging;
+    const dragLimb = limbs[key];
+    const isHand   = key.startsWith('hand');
+    const anchor   = this.getLimbAnchor(key);
+    const maxLen   = (isHand ? ARM_LENGTH : FOOT_LENGTH) * this.cs;
+    const col      = isHand ? 0x60A5FA : 0xFB923C;
+    const SNAP     = 48 * this.cs;
+
+    // Reach circle
+    g.lineStyle(1.5, col, 0.22);
+    g.strokeCircle(anchor.x, anchor.y, maxLen);
+
+    // All holds within arm reach — highlight snappable ones more brightly
+    const occ = Object.entries(limbs)
+      .filter(([k, l]) => k !== key && l.grabbed)
+      .map(([, l]) => l.holdId);
+
+    this.allHolds
+      .filter(h => !occ.includes(h.id))
+      .filter(h => Phaser.Math.Distance.Between(anchor.x, anchor.y, h.x, h.y) <= maxLen)
+      .forEach(h => {
+        const nearSnap = Phaser.Math.Distance.Between(dragLimb.x, dragLimb.y, h.x, h.y) < SNAP;
+        g.lineStyle(nearSnap ? 3 : 1.5, col, nearSnap ? 0.9 : 0.35);
+        g.strokeEllipse(h.x, h.y, nearSnap ? 60 : 50, nearSnap ? 40 : 32);
+      });
   }
 
   // ── Climber ─────────────────────────────────────────────────────────────────
@@ -877,13 +855,9 @@ export default class GameScene extends Phaser.Scene {
     const sl = this.holds[0]; const sr = this.holds[1];
     const fl = this.footHolds[0]; const fr = this.footHolds[1];
     const mkLimb = (h) => ({
-      x: h.x, y: h.y, grabbed: true, holdId: h.id,
-      // animation state
-      phase: 'idle',       // idle | reaching | returning | floating
-      startX: h.x, startY: h.y,
-      targetX: h.x, targetY: h.y,
-      targetHoldId: null,
-      t: 0,                // 0→1 animation progress
+      x: h.x, y: h.y,
+      grabbed: true, holdId: h.id,
+      phase: 'idle',  // idle | dragging | floating
     });
     this.climber = {
       torso: { x:(sl.x+sr.x)/2, y:(sl.y+fl.y)/2-10 },
@@ -1030,11 +1004,9 @@ export default class GameScene extends Phaser.Scene {
     this.add.text(W-20, 22, lv.grade, { fontSize:'22px', fontFamily:'Arial Black', color:hex(lv.color) }).setOrigin(1,0.5);
 
     this.add.rectangle(0, H, W, 44, 0x000000, 0.55).setOrigin(0,1);
-    [{ key:'Q',label:'Hand L',col:'#60A5FA' },{ key:'E',label:'Hand R',col:'#60A5FA' },
-     { key:'Z',label:'Foot L',col:'#FB923C' },{ key:'X',label:'Foot R',col:'#FB923C' }]
-    .forEach((c,i) => this.add.text(W/2-200+i*122, H-22, `[${c.key}] ${c.label}`, {
-      fontSize:'13px', fontFamily:'Arial Black', color:c.col,
-    }).setOrigin(0,0.5));
+    this.add.text(W/2, H-22, 'Drag a limb to a hold  •  ESC menu', {
+      fontSize:'13px', fontFamily:'Arial', color:'#6B7280',
+    }).setOrigin(0.5);
 
     this.add.text(W-120, H-30, 'PUMP', { fontSize:'10px', fontFamily:'Arial Black', color:'#FF6B35' }).setOrigin(0,0.5);
     this.add.rectangle(W-120, H-16, 104, 10, 0x333333).setOrigin(0,0.5);
